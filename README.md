@@ -57,3 +57,24 @@ gdx kill --project $env:TEMP\gdx_hello --json
 ```
 
 The daemon listens on `127.0.0.1`, uses a per-session token stored under `.gdx/daemon/session.json`, and supports one daemon session per project.
+
+## Basic 3D Support
+
+gdx can build and edit simple 3D scenes through the same SceneSpec and daemon commands used for 2D scenes. Supported MVP-level 3D nodes include `Node3D`, `Camera3D`, `MeshInstance3D`, 3D lights, 3D bodies, and `CollisionShape3D`.
+
+Built-in 3D resources can be created inline:
+
+```json
+{
+  "mesh": { "type": "box", "size": [1, 1, 1] }
+}
+```
+
+Supported built-in mesh types are `box`, `sphere`, and `plane`. Supported collision shape types are `box`, `sphere`, and `capsule`.
+
+Example:
+
+```powershell
+gdx scene build --project $env:TEMP\gdx_hello_3d --spec examples\hello_3d_scene.json --out res://scenes/main_3d.tscn --json
+gdx play run --project $env:TEMP\gdx_hello_3d --scene res://scenes/main_3d.tscn --capture $env:TEMP\gdx_hello_3d\shot-3d.png --json
+```

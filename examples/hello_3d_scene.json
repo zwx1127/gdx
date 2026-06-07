@@ -1,0 +1,51 @@
+{
+  "root": {
+    "type": "Node3D",
+    "name": "Main3D",
+    "children": [
+      {
+        "type": "Camera3D",
+        "name": "Camera",
+        "properties": {
+          "position": { "vec3": [0, 3, 6] },
+          "rotation_degrees": { "vec3": [-25, 0, 0] },
+          "current": true
+        }
+      },
+      {
+        "type": "DirectionalLight3D",
+        "name": "Sun",
+        "properties": {
+          "rotation_degrees": { "vec3": [-45, -30, 0] },
+          "light_energy": 2.0
+        }
+      },
+      {
+        "type": "MeshInstance3D",
+        "name": "Ground",
+        "properties": {
+          "mesh": { "mesh": { "type": "plane", "size": [8, 8] } },
+          "material_override": { "material": { "color": [0.25, 0.55, 0.32, 1] } }
+        }
+      },
+      {
+        "type": "MeshInstance3D",
+        "name": "Cube",
+        "properties": {
+          "position": { "vec3": [-1.1, 0.5, 0] },
+          "mesh": { "mesh": { "type": "box", "size": [1, 1, 1] } },
+          "material_override": { "material": { "color": [0.15, 0.34, 0.95, 1] } }
+        }
+      },
+      {
+        "type": "MeshInstance3D",
+        "name": "Ball",
+        "properties": {
+          "position": { "vec3": [1.2, 0.5, 0] },
+          "mesh": { "mesh": { "type": "sphere", "radius": 0.5, "height": 1.0 } },
+          "material_override": { "material": { "color": [0.95, 0.24, 0.18, 1] } }
+        }
+      }
+    ]
+  }
+}

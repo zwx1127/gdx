@@ -29,3 +29,19 @@ gdx kill --project $env:TEMP\gdx_hello --json
 ```
 
 The daemon listens only on `127.0.0.1` and uses a per-session token in `.gdx/daemon/session.json`.
+
+Basic 3D scenes use the same JSON value wrappers:
+
+```json
+{
+  "type": "MeshInstance3D",
+  "name": "Cube",
+  "properties": {
+    "position": { "vec3": [0, 0.5, 0] },
+    "mesh": { "mesh": { "type": "box", "size": [1, 1, 1] } },
+    "material_override": { "material": { "color": [0.15, 0.34, 0.95, 1] } }
+  }
+}
+```
+
+MVP 3D support covers built-in `box`, `sphere`, and `plane` meshes plus basic `StandardMaterial3D` colors. It does not yet cover glTF import automation, animation, navigation, or complex material graphs.

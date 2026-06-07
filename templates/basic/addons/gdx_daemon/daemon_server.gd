@@ -11,6 +11,16 @@ const ALLOWED_TYPES := {
     "CharacterBody2D": true,
     "RigidBody2D": true,
     "StaticBody2D": true,
+    "Node3D": true,
+    "Camera3D": true,
+    "MeshInstance3D": true,
+    "DirectionalLight3D": true,
+    "OmniLight3D": true,
+    "SpotLight3D": true,
+    "StaticBody3D": true,
+    "CharacterBody3D": true,
+    "RigidBody3D": true,
+    "CollisionShape3D": true,
 }
 
 var server := TCPServer.new()
@@ -264,15 +274,83 @@ func _to_variant(value):
         return value
     if value.has("vec2"):
         return Vector2(float(value["vec2"][0]), float(value["vec2"][1]))
+    if value.has("vector2"):
+        return Vector2(float(value["vector2"][0]), float(value["vector2"][1]))
     if value.has("vec3"):
         return Vector3(float(value["vec3"][0]), float(value["vec3"][1]), float(value["vec3"][2]))
+    if value.has("vector3"):
+        return Vector3(float(value["vector3"][0]), float(value["vector3"][1]), float(value["vector3"][2]))
     if value.has("color"):
         return Color(float(value["color"][0]), float(value["color"][1]), float(value["color"][2]), float(value["color"][3]))
+    if value.has("transform3d"):
+        return _to_transform3d(value["transform3d"])
+    if value.has("mesh"):
+        return _to_mesh(value["mesh"])
+    if value.has("material"):
+        return _to_material(value["material"])
+    if value.has("shape3d"):
+        return _to_shape3d(value["shape3d"])
     if value.has("resource"):
         return load(str(value["resource"]))
     if value.has("node_path"):
         return NodePath(str(value["node_path"]))
     return value
+
+func _to_transform3d(value: Dictionary) -> Transform3D:
+    var origin_values: Array = value.get("origin", [0, 0, 0])
+    var origin := Vector3(float(origin_values[0]), float(origin_values[1]), float(origin_values[2]))
+    var basis_values: Array = value.get("basis", [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    var x := Vector3(float(basis_values[0][0]), float(basis_values[0][1]), float(basis_values[0][2]))
+    var y := Vector3(float(basis_values[1][0]), float(basis_values[1][1]), float(basis_values[1][2]))
+    var z := Vector3(float(basis_values[2][0]), float(basis_values[2][1]), float(basis_values[2][2]))
+    return Transform3D(Basis(x, y, z), origin)
+
+func _to_mesh(value: Dictionary):
+    var type_name := str(value.get("type", ""))
+    match type_name:
+        "box":
+            var mesh := BoxMesh.new()
+            var size: Array = value.get("size", [1, 1, 1])
+            mesh.size = Vector3(float(size[0]), float(size[1]), float(size[2]))
+            return mesh
+        "sphere":
+            var mesh := SphereMesh.new()
+            mesh.radius = float(value.get("radius", 0.5))
+            mesh.height = float(value.get("height", mesh.radius * 2.0))
+            return mesh
+        "plane":
+            var mesh := PlaneMesh.new()
+            var size: Array = value.get("size", [1, 1])
+            mesh.size = Vector2(float(size[0]), float(size[1]))
+            return mesh
+        _:
+            return null
+
+func _to_material(value: Dictionary) -> StandardMaterial3D:
+    var material := StandardMaterial3D.new()
+    if value.has("color"):
+        material.albedo_color = _to_variant({ "color": value["color"] })
+    return material
+
+func _to_shape3d(value: Dictionary):
+    var type_name := str(value.get("type", ""))
+    match type_name:
+        "box":
+            var shape := BoxShape3D.new()
+            var size: Array = value.get("size", [1, 1, 1])
+            shape.size = Vector3(float(size[0]), float(size[1]), float(size[2]))
+            return shape
+        "sphere":
+            var shape := SphereShape3D.new()
+            shape.radius = float(value.get("radius", 0.5))
+            return shape
+        "capsule":
+            var shape := CapsuleShape3D.new()
+            shape.radius = float(value.get("radius", 0.5))
+            shape.height = float(value.get("height", 2.0))
+            return shape
+        _:
+            return null
 
 func _send_result(peer: StreamPeerTCP, id: String, result: Dictionary) -> void:
     _send(peer, { "ok": true, "id": id, "result": result })
