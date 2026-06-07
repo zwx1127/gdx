@@ -1,4 +1,5 @@
 mod commands;
+mod daemon;
 mod error;
 mod godot;
 mod output;

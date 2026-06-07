@@ -5,6 +5,7 @@ mod export;
 mod init;
 mod play;
 mod scene;
+mod session;
 
 use std::path::PathBuf;
 
@@ -14,7 +15,7 @@ use serde_json::Value;
 use crate::error::GdxResult;
 
 #[derive(Debug, Parser)]
-#[command(name = "gdx", version, about = "Godot automation CLI for gdx MVP-0")]
+#[command(name = "gdx", version, about = "Godot automation CLI for gdx")]
 pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
@@ -33,6 +34,10 @@ pub enum Commands {
     Scene(SceneCommand),
     Asset(AssetCommand),
     Code(CodeCommand),
+    Capture(session::CaptureArgs),
+    Serve(session::ServeArgs),
+    Status(session::StatusArgs),
+    Kill(session::KillArgs),
     Play(PlayCommand),
     Export(ExportCommand),
 }
@@ -57,6 +62,10 @@ pub struct SceneCommand {
 #[derive(Debug, Subcommand)]
 pub enum SceneSubcommand {
     Build(scene::BuildArgs),
+    Tree(scene::TreeArgs),
+    AddNode(scene::AddNodeArgs),
+    Set(scene::SetArgs),
+    Save(scene::SaveArgs),
 }
 
 #[derive(Debug, Args)]
@@ -111,6 +120,10 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         },
         Commands::Scene(command) => match &command.command {
             SceneSubcommand::Build(args) => scene::run_build(cli, args),
+            SceneSubcommand::Tree(args) => scene::run_tree(args),
+            SceneSubcommand::AddNode(args) => scene::run_add_node(args),
+            SceneSubcommand::Set(args) => scene::run_set(args),
+            SceneSubcommand::Save(args) => scene::run_save(args),
         },
         Commands::Asset(command) => match &command.command {
             AssetSubcommand::Import(args) => asset::run_import(cli, args),
@@ -118,6 +131,10 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         Commands::Code(command) => match &command.command {
             CodeSubcommand::Check(args) => code::run_check(cli, args),
         },
+        Commands::Capture(args) => session::run_capture(args),
+        Commands::Serve(args) => session::run_serve(cli, args),
+        Commands::Status(args) => session::run_status(args),
+        Commands::Kill(args) => session::run_kill(args),
         Commands::Play(command) => match &command.command {
             PlaySubcommand::Run(args) => play::run_play(cli, args),
         },

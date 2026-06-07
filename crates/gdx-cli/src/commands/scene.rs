@@ -6,6 +6,7 @@ use gdx_schema::SceneSpec;
 use serde_json::json;
 
 use crate::commands::Cli;
+use crate::daemon;
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{self, GodotCommand};
 use crate::project::{
@@ -22,6 +23,51 @@ pub struct BuildArgs {
 
     #[arg(long)]
     pub out: String,
+}
+
+#[derive(Debug, Args)]
+pub struct TreeArgs {
+    #[arg(long)]
+    pub project: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct AddNodeArgs {
+    #[arg(long)]
+    pub project: PathBuf,
+
+    #[arg(long)]
+    pub parent: String,
+
+    #[arg(long = "type")]
+    pub type_name: String,
+
+    #[arg(long)]
+    pub name: String,
+}
+
+#[derive(Debug, Args)]
+pub struct SetArgs {
+    #[arg(long)]
+    pub project: PathBuf,
+
+    #[arg(long)]
+    pub node: String,
+
+    #[arg(long)]
+    pub property: String,
+
+    #[arg(long)]
+    pub value_json: String,
+}
+
+#[derive(Debug, Args)]
+pub struct SaveArgs {
+    #[arg(long)]
+    pub project: PathBuf,
+
+    #[arg(long)]
+    pub out: Option<String>,
 }
 
 pub fn run_build(cli: &Cli, args: &BuildArgs) -> GdxResult<serde_json::Value> {
@@ -94,5 +140,102 @@ pub fn run_build(cli: &Cli, args: &BuildArgs) -> GdxResult<serde_json::Value> {
             "stdout_log": godot_path_string(&result.stdout_log),
             "stderr_log": godot_path_string(&result.stderr_log)
         }
+    }))
+}
+
+pub fn run_tree(args: &TreeArgs) -> GdxResult<serde_json::Value> {
+    let project = assert_project(&args.project)?;
+    let result = daemon::rpc(&project.root, "scene_tree", json!({}), 10)?;
+    Ok(json!({
+        "ok": true,
+        "command": "scene.tree",
+        "project": godot_path_string(&project.root),
+        "tree": result
+    }))
+}
+
+pub fn run_add_node(args: &AddNodeArgs) -> GdxResult<serde_json::Value> {
+    if args.parent.trim().is_empty() {
+        return Err(GdxError::user(
+            "invalid_parent",
+            "--parent must not be empty",
+        ));
+    }
+    if args.type_name.trim().is_empty() {
+        return Err(GdxError::user("invalid_type", "--type must not be empty"));
+    }
+    if args.name.trim().is_empty() {
+        return Err(GdxError::user("invalid_name", "--name must not be empty"));
+    }
+    let project = assert_project(&args.project)?;
+    let result = daemon::rpc(
+        &project.root,
+        "add_node",
+        json!({
+            "parent": args.parent,
+            "type": args.type_name,
+            "name": args.name
+        }),
+        10,
+    )?;
+    Ok(json!({
+        "ok": true,
+        "command": "scene.add-node",
+        "project": godot_path_string(&project.root),
+        "node": result
+    }))
+}
+
+pub fn run_set(args: &SetArgs) -> GdxResult<serde_json::Value> {
+    if args.node.trim().is_empty() {
+        return Err(GdxError::user("invalid_node", "--node must not be empty"));
+    }
+    if args.property.trim().is_empty() {
+        return Err(GdxError::user(
+            "invalid_property",
+            "--property must not be empty",
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_str(&args.value_json)
+        .unwrap_or_else(|_| serde_json::Value::String(args.value_json.clone()));
+    let project = assert_project(&args.project)?;
+    let result = daemon::rpc(
+        &project.root,
+        "set_property",
+        json!({
+            "node": args.node,
+            "property": args.property,
+            "value": value
+        }),
+        10,
+    )?;
+    Ok(json!({
+        "ok": true,
+        "command": "scene.set",
+        "project": godot_path_string(&project.root),
+        "result": result
+    }))
+}
+
+pub fn run_save(args: &SaveArgs) -> GdxResult<serde_json::Value> {
+    if let Some(out) = &args.out {
+        if !out.starts_with("res://") {
+            return Err(GdxError::user("invalid_out", "--out must be a res:// path"));
+        }
+    }
+    let project = assert_project(&args.project)?;
+    let result = daemon::rpc(
+        &project.root,
+        "save_scene",
+        json!({
+            "out": args.out
+        }),
+        10,
+    )?;
+    Ok(json!({
+        "ok": true,
+        "command": "scene.save",
+        "project": godot_path_string(&project.root),
+        "result": result
     }))
 }
