@@ -42,8 +42,8 @@ Invoke-Native cargo build -p gdx-cli
 
 $Common = @("--godot", $Godot)
 
-Invoke-Native $Bin init --path $Work --name daemon3d --json
-Invoke-Native $Bin @Common scene new `
+Invoke-Native $Bin project init --project $Work --name daemon3d --json
+Invoke-Native $Bin @Common scene create `
     --project $Work `
     --out "res://scenes/main_3d.tscn" `
     --root-type Node3D `
@@ -53,7 +53,7 @@ Invoke-Native $Bin @Common scene new `
 Invoke-Native $Bin @Common asset import --project $Work --json
 
 try {
-    Invoke-Native $Bin @Common serve `
+    Invoke-Native $Bin @Common daemon start `
         --project $Work `
         --width 1280 `
         --height 720 `
@@ -61,21 +61,21 @@ try {
         --json
 
     Invoke-Native $Bin scene tree --project $Work --json
-    Invoke-Native $Bin scene add-node --project $Work --parent "/" --type MeshInstance3D --name AddedBox --json
+    Invoke-Native $Bin scene node add --project $Work --parent "/" --type MeshInstance3D --name AddedBox --json
 
-    Invoke-Native $Bin scene set --project $Work --node "/AddedBox" --property position --vec3 2 0.5 0 --json
+    Invoke-Native $Bin scene node set-property --project $Work --node "/AddedBox" --property position --vec3 2 0.5 0 --json
     Invoke-Native $Bin scene save --project $Work --json
 
     $SceneText = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Work "scenes\main_3d.tscn")
     if ($SceneText -notmatch "AddedBox") { throw "Saved scene does not include AddedBox" }
 
-    Invoke-Native $Bin capture --project $Work --out $Shot --frames 10 --json
+    Invoke-Native $Bin daemon capture --project $Work --out $Shot --frames 10 --json
 
     $ShotInfo = Get-Item -LiteralPath $Shot
     if ($ShotInfo.Length -le 0) { throw "Capture is empty: $Shot" }
 }
 finally {
-    & $Bin kill --project $Work --force --json
+    & $Bin daemon stop --project $Work --force --json
 }
 
 Write-Host "GDX DAEMON 3D E2E PASS: $Shot"

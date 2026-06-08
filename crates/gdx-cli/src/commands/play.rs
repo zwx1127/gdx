@@ -11,7 +11,7 @@ use crate::godot::{self, GodotCommand};
 use crate::project::{assert_project, ensure_parent_dir, godot_path_string, read_main_scene};
 
 #[derive(Debug, Args)]
-pub struct RunArgs {
+pub struct CaptureArgs {
     #[arg(long)]
     pub project: PathBuf,
 
@@ -19,7 +19,7 @@ pub struct RunArgs {
     pub scene: Option<String>,
 
     #[arg(long)]
-    pub capture: PathBuf,
+    pub out: PathBuf,
 
     #[arg(long, default_value_t = 10)]
     pub frames: u32,
@@ -31,7 +31,7 @@ pub struct RunArgs {
     pub height: u32,
 }
 
-pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
+pub fn run_capture(cli: &Cli, args: &CaptureArgs) -> GdxResult<serde_json::Value> {
     let project = assert_project(&args.project)?;
     let scene = resolve_scene(&project.root, args.scene.as_deref())?;
     if !scene.starts_with("res://") {
@@ -46,14 +46,14 @@ pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
             "Width and height must be greater than zero",
         ));
     }
-    let capture = if args.capture.is_absolute() {
-        args.capture.clone()
+    let capture = if args.out.is_absolute() {
+        args.out.clone()
     } else {
         std::env::current_dir()
             .map_err(|err| {
                 GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
             })?
-            .join(&args.capture)
+            .join(&args.out)
     };
     ensure_parent_dir(&capture)?;
     let binary = godot::locate_godot(cli.godot.as_deref())?;
@@ -96,7 +96,7 @@ pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
 
     Ok(json!({
         "ok": true,
-        "command": "play.run",
+        "command": "run.capture",
         "project": godot_path_string(&project.root),
         "scene": scene,
         "capture": godot_path_string(&capture),
@@ -119,7 +119,7 @@ fn resolve_scene(project: &std::path::Path, explicit: Option<&str>) -> GdxResult
             "main_scene_missing",
             "No scene was provided and project has no main scene",
         )
-        .with_suggestion("Pass --scene res://... or create one with gdx scene new --set-main.")
+        .with_suggestion("Pass --scene res://... or create one with gdx scene create --set-main.")
     })
 }
 

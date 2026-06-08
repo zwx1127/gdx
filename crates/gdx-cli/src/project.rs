@@ -43,7 +43,7 @@ pub fn read_project_setting(project: &Path, section: &str, key: &str) -> GdxResu
     Ok(read_setting_from_text(&text, section, key))
 }
 
-pub fn set_project_setting(project: &Path, section: &str, key: &str, value: &str) -> GdxResult<()> {
+pub fn list_project_settings(project: &Path, section: &str) -> GdxResult<Vec<(String, String)>> {
     let path = project.join("project.godot");
     let text = fs::read_to_string(&path).map_err(|err| {
         GdxError::tool(
@@ -51,13 +51,63 @@ pub fn set_project_setting(project: &Path, section: &str, key: &str, value: &str
             format!("Cannot read {}: {err}", path.display()),
         )
     })?;
-    let updated = set_setting_in_text(&text, section, key, value);
+    Ok(list_settings_from_text(&text, section))
+}
+
+pub fn set_project_setting(project: &Path, section: &str, key: &str, value: &str) -> GdxResult<()> {
+    set_project_setting_quoted(project, section, key, value)
+}
+
+pub fn set_project_setting_quoted(
+    project: &Path,
+    section: &str,
+    key: &str,
+    value: &str,
+) -> GdxResult<()> {
+    let raw_value = format!("\"{}\"", escape_project_value(value));
+    set_project_setting_raw(project, section, key, &raw_value)
+}
+
+pub fn set_project_setting_raw(
+    project: &Path,
+    section: &str,
+    key: &str,
+    raw_value: &str,
+) -> GdxResult<()> {
+    let path = project.join("project.godot");
+    let text = fs::read_to_string(&path).map_err(|err| {
+        GdxError::tool(
+            "io_failed",
+            format!("Cannot read {}: {err}", path.display()),
+        )
+    })?;
+    let updated = set_setting_in_text(&text, section, key, raw_value);
     fs::write(&path, updated).map_err(|err| {
         GdxError::tool(
             "io_failed",
             format!("Cannot write {}: {err}", path.display()),
         )
     })
+}
+
+pub fn remove_project_setting(project: &Path, section: &str, key: &str) -> GdxResult<bool> {
+    let path = project.join("project.godot");
+    let text = fs::read_to_string(&path).map_err(|err| {
+        GdxError::tool(
+            "io_failed",
+            format!("Cannot read {}: {err}", path.display()),
+        )
+    })?;
+    let (updated, removed) = remove_setting_in_text(&text, section, key);
+    if removed {
+        fs::write(&path, updated).map_err(|err| {
+            GdxError::tool(
+                "io_failed",
+                format!("Cannot write {}: {err}", path.display()),
+            )
+        })?;
+    }
+    Ok(removed)
 }
 
 pub fn res_to_abs(project: &Path, path: &str) -> GdxResult<PathBuf> {
@@ -146,8 +196,26 @@ fn read_setting_from_text(text: &str, section: &str, key: &str) -> Option<String
     None
 }
 
-fn set_setting_in_text(text: &str, section: &str, key: &str, value: &str) -> String {
-    let replacement = format!("{key}=\"{}\"", escape_project_value(value));
+fn list_settings_from_text(text: &str, section: &str) -> Vec<(String, String)> {
+    let mut in_section = false;
+    let mut settings = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = &trimmed[1..trimmed.len() - 1] == section;
+            continue;
+        }
+        if in_section {
+            if let Some((candidate, value)) = trimmed.split_once('=') {
+                settings.push((candidate.trim().to_string(), unquote(value.trim())));
+            }
+        }
+    }
+    settings
+}
+
+fn set_setting_in_text(text: &str, section: &str, key: &str, raw_value: &str) -> String {
+    let replacement = format!("{key}={raw_value}");
     let mut lines: Vec<String> = text.lines().map(ToString::to_string).collect();
     let section_header = format!("[{section}]");
     let mut section_start = None;
@@ -187,6 +255,38 @@ fn set_setting_in_text(text: &str, section: &str, key: &str, value: &str) -> Str
     lines.push(section_header);
     lines.push(replacement);
     finish_lines(lines)
+}
+
+fn remove_setting_in_text(text: &str, section: &str, key: &str) -> (String, bool) {
+    let mut lines: Vec<String> = text.lines().map(ToString::to_string).collect();
+    let section_header = format!("[{section}]");
+    let mut in_section = false;
+    let mut remove_at = None;
+
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed == section_header;
+            continue;
+        }
+        if in_section
+            && line
+                .trim_start()
+                .strip_prefix(key)
+                .and_then(|rest| rest.trim_start().strip_prefix('='))
+                .is_some()
+        {
+            remove_at = Some(index);
+            break;
+        }
+    }
+
+    if let Some(index) = remove_at {
+        lines.remove(index);
+        (finish_lines(lines), true)
+    } else {
+        (text.to_string(), false)
+    }
 }
 
 fn finish_lines(lines: Vec<String>) -> String {
@@ -230,7 +330,8 @@ mod tests {
     #[test]
     fn sets_project_setting_in_existing_section() {
         let text = "config_version=5\n\n[application]\nconfig/name=\"Demo\"\n";
-        let updated = set_setting_in_text(text, "application", "run/main_scene", "res://main.tscn");
+        let updated =
+            set_setting_in_text(text, "application", "run/main_scene", "\"res://main.tscn\"");
 
         assert!(updated.contains("config/name=\"Demo\""));
         assert!(updated.contains("run/main_scene=\"res://main.tscn\""));

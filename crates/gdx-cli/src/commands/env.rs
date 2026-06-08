@@ -30,7 +30,7 @@ pub fn run(cli: &Cli) -> GdxResult<serde_json::Value> {
 
     Ok(json!({
         "ok": true,
-        "command": "env",
+        "command": "doctor",
         "godot": {
             "path": godot_path_string(&binary),
             "version": version

@@ -6,7 +6,8 @@ use serde_json::json;
 
 use crate::constants::{
     GDX_DAEMON_SERVER_GD, GDX_DAEMON_SERVER_TSCN, GDX_GITIGNORE_ENTRIES,
-    GDX_RUNTIME_CAPTURE_RUNNER_GD, GDX_RUNTIME_CAPTURE_RUNNER_TSCN, GDX_TOOLS_CREATE_SCENE_GD,
+    GDX_RUNTIME_CAPTURE_RUNNER_GD, GDX_RUNTIME_CAPTURE_RUNNER_TSCN, GDX_TOOLS_AUTOMATION_GD,
+    GDX_TOOLS_CREATE_SCENE_GD,
 };
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
@@ -14,7 +15,7 @@ use crate::project::{ensure_dir, godot_path_string};
 #[derive(Debug, Args)]
 pub struct InitArgs {
     #[arg(long)]
-    pub path: PathBuf,
+    pub project: PathBuf,
 
     #[arg(long)]
     pub name: String,
@@ -32,6 +33,10 @@ const ADDON_FILES: &[ResourceFile] = &[
     ResourceFile {
         path: GDX_TOOLS_CREATE_SCENE_GD,
         contents: include_str!("../../resources/addons/gdx_tools/create_scene.gd"),
+    },
+    ResourceFile {
+        path: GDX_TOOLS_AUTOMATION_GD,
+        contents: include_str!("../../resources/addons/gdx_tools/automation.gd"),
     },
     ResourceFile {
         path: GDX_RUNTIME_CAPTURE_RUNNER_GD,
@@ -59,14 +64,14 @@ pub fn run(args: &InitArgs) -> GdxResult<serde_json::Value> {
         ));
     }
 
-    let target = if args.path.is_absolute() {
-        args.path.clone()
+    let target = if args.project.is_absolute() {
+        args.project.clone()
     } else {
         std::env::current_dir()
             .map_err(|err| {
                 GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
             })?
-            .join(&args.path)
+            .join(&args.project)
     };
 
     if target.exists()
@@ -101,7 +106,7 @@ pub fn run(args: &InitArgs) -> GdxResult<serde_json::Value> {
 
     Ok(json!({
         "ok": true,
-        "command": "init",
+        "command": "project.init",
         "project": godot_path_string(&target),
         "files": files
     }))
@@ -166,7 +171,7 @@ mod tests {
         let path = temp_project("minimal");
         let _ = fs::remove_dir_all(&path);
         let args = InitArgs {
-            path: path.clone(),
+            project: path.clone(),
             name: "hello".to_string(),
             force: false,
         };
@@ -179,6 +184,7 @@ mod tests {
         assert!(!project.contains("run/main_scene"));
         assert!(!project.contains("renderer/rendering_method"));
         assert!(path.join("addons/gdx_tools/create_scene.gd").is_file());
+        assert!(path.join("addons/gdx_tools/automation.gd").is_file());
         assert!(path.join("addons/gdx_runtime/capture_runner.gd").is_file());
         assert!(path.join("addons/gdx_daemon/daemon_server.gd").is_file());
         assert!(!path.join("scripts/main.gd").exists());
@@ -195,7 +201,7 @@ mod tests {
         fs::create_dir_all(&path).unwrap();
         fs::write(path.join("user.txt"), "keep").unwrap();
         let args = InitArgs {
-            path: path.clone(),
+            project: path.clone(),
             name: "hello".to_string(),
             force: false,
         };

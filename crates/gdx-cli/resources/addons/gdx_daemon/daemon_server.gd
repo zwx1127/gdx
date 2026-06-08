@@ -101,6 +101,12 @@ func _handle_line(peer: StreamPeerTCP, line: String) -> void:
             _rpc_save_scene(peer, id, params)
         "capture":
             _rpc_capture(peer, id, params)
+        "input_event":
+            _rpc_input_event(peer, id, params)
+        "call_method":
+            _rpc_call_method(peer, id, params)
+        "get_state":
+            _rpc_get_state(peer, id, params)
         _:
             _send_error(peer, id, "unknown_method", "Unknown RPC method: %s" % method)
 
@@ -191,6 +197,65 @@ func _rpc_capture(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
         "armed": false,
     }
 
+func _rpc_input_event(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    var kind := str(params.get("kind", ""))
+    match kind:
+        "key":
+            var key := InputEventKey.new()
+            key.keycode = int(params.get("keycode", 0))
+            key.pressed = bool(params.get("pressed", true))
+            Input.parse_input_event(key)
+        "mouse_button":
+            var mouse := InputEventMouseButton.new()
+            mouse.button_index = int(params.get("button", 1))
+            mouse.position = _to_variant({ "vec2": params.get("position", [0, 0]) })
+            mouse.pressed = bool(params.get("pressed", true))
+            Input.parse_input_event(mouse)
+        "mouse_motion":
+            var motion := InputEventMouseMotion.new()
+            motion.position = _to_variant({ "vec2": params.get("position", [0, 0]) })
+            Input.parse_input_event(motion)
+        _:
+            _send_error(peer, id, "unknown_input_kind", "Unknown input kind: %s" % kind)
+            return
+    _send_result(peer, id, { "kind": kind })
+
+func _rpc_call_method(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    var target_path := str(params.get("target", ""))
+    var method := str(params.get("method", ""))
+    if method == "":
+        _send_error(peer, id, "missing_method", "method is required")
+        return
+    var target := _resolve_target(target_path)
+    if target == null:
+        _send_error(peer, id, "target_not_found", "Target not found: %s" % target_path)
+        return
+    if not target.has_method(method):
+        _send_error(peer, id, "method_not_found", "Method not found: %s" % method)
+        return
+    var args: Array = params.get("args", [])
+    var converted: Array = []
+    for arg in args:
+        converted.append(_to_variant(arg))
+    var result = target.callv(method, converted)
+    _send_result(peer, id, { "target": target_path, "method": method, "result": _json_safe(result) })
+
+func _rpc_get_state(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    var target_path := str(params.get("target", ""))
+    var target := _resolve_target(target_path)
+    if target == null:
+        _send_error(peer, id, "target_not_found", "Target not found: %s" % target_path)
+        return
+    var method := str(params.get("method", "gdx_state"))
+    if target.has_method(method):
+        _send_result(peer, id, { "target": target_path, "state": _json_safe(target.call(method)) })
+        return
+    var property := str(params.get("property", ""))
+    if property != "":
+        _send_result(peer, id, { "target": target_path, "property": property, "state": _json_safe(target.get(property)) })
+        return
+    _send_error(peer, id, "state_not_available", "Target has no state method and no property was requested")
+
 func _tick_capture() -> void:
     if pending_capture.is_empty():
         return
@@ -225,6 +290,11 @@ func _resolve_node(path: String) -> Node:
         clean = clean.substr(1)
     return scene_root.get_node_or_null(NodePath(clean))
 
+func _resolve_target(path: String) -> Object:
+    if path.begins_with("/root/"):
+        return get_tree().root.get_node_or_null(NodePath(path.substr(6)))
+    return _resolve_node(path)
+
 func _node_to_dict(node: Node, path: String) -> Dictionary:
     var children: Array = []
     for child in node.get_children():
@@ -249,6 +319,11 @@ func _set_owner_recursive(node: Node, owner: Node) -> void:
 
 func _to_variant(value):
     if typeof(value) != TYPE_DICTIONARY:
+        if typeof(value) == TYPE_ARRAY:
+            var converted_array: Array = []
+            for item in value:
+                converted_array.append(_to_variant(item))
+            return converted_array
         return value
     if value.has("vec2"):
         return Vector2(float(value["vec2"][0]), float(value["vec2"][1]))
@@ -272,7 +347,33 @@ func _to_variant(value):
         return load(str(value["resource"]))
     if value.has("node_path"):
         return NodePath(str(value["node_path"]))
-    return value
+    var converted_dict := {}
+    for key in value.keys():
+        converted_dict[key] = _to_variant(value[key])
+    return converted_dict
+
+func _json_safe(value):
+    match typeof(value):
+        TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING:
+            return value
+        TYPE_VECTOR2:
+            return { "vec2": [value.x, value.y] }
+        TYPE_VECTOR3:
+            return { "vec3": [value.x, value.y, value.z] }
+        TYPE_COLOR:
+            return { "color": [value.r, value.g, value.b, value.a] }
+        TYPE_ARRAY:
+            var arr: Array = []
+            for item in value:
+                arr.append(_json_safe(item))
+            return arr
+        TYPE_DICTIONARY:
+            var dict := {}
+            for key in value.keys():
+                dict[str(key)] = _json_safe(value[key])
+            return dict
+        _:
+            return str(value)
 
 func _to_transform3d(value: Dictionary) -> Transform3D:
     var origin_values: Array = value.get("origin", [0, 0, 0])

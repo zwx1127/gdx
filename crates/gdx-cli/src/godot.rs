@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::constants::GDX_TOOLS_AUTOMATION_RES;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
 
@@ -213,6 +214,31 @@ pub fn godot_failed(result: &GodotRunResult) -> GdxError {
         .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
         .with_artifact("stderr_log", godot_path_string(&result.stderr_log))
         .with_suggestion("Open the stderr log and fix the first Godot error.")
+}
+
+pub fn run_automation(
+    binary: PathBuf,
+    project: PathBuf,
+    action: &str,
+    params: Value,
+    timeout_secs: u64,
+) -> GdxResult<GodotRunResult> {
+    run(GodotCommand {
+        binary,
+        project: project.clone(),
+        args: vec![
+            "--headless".to_string(),
+            "--path".to_string(),
+            godot_path_string(&project),
+            "-s".to_string(),
+            GDX_TOOLS_AUTOMATION_RES.to_string(),
+        ],
+        envs: vec![
+            ("GDX_TOOL_ACTION".to_string(), action.to_string()),
+            ("GDX_TOOL_PARAMS".to_string(), params.to_string()),
+        ],
+        timeout_secs,
+    })
 }
 
 fn last_stdout_json(stdout: &str) -> Option<Value> {

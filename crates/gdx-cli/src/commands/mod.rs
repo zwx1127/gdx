@@ -5,8 +5,10 @@ mod export;
 mod init;
 mod play;
 mod project_cmd;
+mod resource;
 mod scene;
 mod session;
+mod test_cmd;
 
 use std::path::PathBuf;
 
@@ -30,17 +32,15 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    Env,
-    Init(init::InitArgs),
+    Doctor,
     Project(ProjectCommand),
     Scene(SceneCommand),
     Asset(AssetCommand),
-    Code(CodeCommand),
-    Capture(session::CaptureArgs),
-    Serve(session::ServeArgs),
-    Status(session::StatusArgs),
-    Kill(session::KillArgs),
-    Play(PlayCommand),
+    Script(ScriptCommand),
+    Daemon(DaemonCommand),
+    Run(RunCommand),
+    Resource(ResourceCommand),
+    Test(TestCommand),
     Export(ExportCommand),
 }
 
@@ -58,17 +58,72 @@ pub struct ProjectCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ProjectSubcommand {
-    Setup(project_cmd::SetupArgs),
+    Init(init::InitArgs),
+    Install(project_cmd::InstallArgs),
     Inspect(project_cmd::InspectArgs),
+    Setting(ProjectSettingCommand),
+    Autoload(ProjectAutoloadCommand),
+    Input(ProjectInputCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectSettingCommand {
+    #[command(subcommand)]
+    pub command: ProjectSettingSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectSettingSubcommand {
+    Get(project_cmd::SettingGetArgs),
+    Set(project_cmd::SettingSetArgs),
+    List(project_cmd::SettingListArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectAutoloadCommand {
+    #[command(subcommand)]
+    pub command: ProjectAutoloadSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectAutoloadSubcommand {
+    Add(project_cmd::AutoloadAddArgs),
+    Remove(project_cmd::AutoloadRemoveArgs),
+    List(project_cmd::AutoloadListArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectInputCommand {
+    #[command(subcommand)]
+    pub command: ProjectInputSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectInputSubcommand {
+    Add(project_cmd::InputAddArgs),
+    Remove(project_cmd::InputRemoveArgs),
+    List(project_cmd::InputListArgs),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum SceneSubcommand {
-    New(scene::NewArgs),
+    Create(scene::CreateArgs),
+    Build(scene::BuildArgs),
     Tree(scene::TreeArgs),
-    AddNode(scene::AddNodeArgs),
-    Set(scene::SetArgs),
+    Node(SceneNodeCommand),
     Save(scene::SaveArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct SceneNodeCommand {
+    #[command(subcommand)]
+    pub command: SceneNodeSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SceneNodeSubcommand {
+    Add(scene::AddNodeArgs),
+    SetProperty(scene::SetPropertyArgs),
 }
 
 #[derive(Debug, Args)]
@@ -79,29 +134,74 @@ pub struct AssetCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AssetSubcommand {
+    Copy(asset::CopyArgs),
     Import(asset::ImportArgs),
+    Inspect(asset::InspectArgs),
 }
 
 #[derive(Debug, Args)]
-pub struct CodeCommand {
+pub struct ScriptCommand {
     #[command(subcommand)]
-    pub command: CodeSubcommand,
+    pub command: ScriptSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum CodeSubcommand {
+pub enum ScriptSubcommand {
+    Create(code::CreateArgs),
+    Attach(code::AttachArgs),
     Check(code::CheckArgs),
+    CheckAll(code::CheckAllArgs),
 }
 
 #[derive(Debug, Args)]
-pub struct PlayCommand {
+pub struct DaemonCommand {
     #[command(subcommand)]
-    pub command: PlaySubcommand,
+    pub command: DaemonSubcommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum PlaySubcommand {
-    Run(play::RunArgs),
+pub enum DaemonSubcommand {
+    Start(session::StartArgs),
+    Status(session::StatusArgs),
+    Stop(session::StopArgs),
+    Capture(session::CaptureArgs),
+    Input(session::InputArgs),
+    Call(session::CallArgs),
+    State(session::StateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RunCommand {
+    #[command(subcommand)]
+    pub command: RunSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunSubcommand {
+    Capture(play::CaptureArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ResourceCommand {
+    #[command(subcommand)]
+    pub command: ResourceSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ResourceSubcommand {
+    Create(resource::CreateArgs),
+    Inspect(resource::InspectArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TestCommand {
+    #[command(subcommand)]
+    pub command: TestSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TestSubcommand {
+    Run(test_cmd::RunArgs),
 }
 
 #[derive(Debug, Args)]
@@ -117,31 +217,66 @@ pub enum ExportSubcommand {
 
 pub fn run(cli: &Cli) -> GdxResult<Value> {
     match &cli.command {
-        Commands::Env => env::run(cli),
-        Commands::Init(args) => init::run(args),
+        Commands::Doctor => env::run(cli),
         Commands::Project(command) => match &command.command {
-            ProjectSubcommand::Setup(args) => project_cmd::run_setup(args),
+            ProjectSubcommand::Init(args) => init::run(args),
+            ProjectSubcommand::Install(args) => project_cmd::run_install(args),
             ProjectSubcommand::Inspect(args) => project_cmd::run_inspect(args),
+            ProjectSubcommand::Setting(command) => match &command.command {
+                ProjectSettingSubcommand::Get(args) => project_cmd::run_setting_get(args),
+                ProjectSettingSubcommand::Set(args) => project_cmd::run_setting_set(args),
+                ProjectSettingSubcommand::List(args) => project_cmd::run_setting_list(args),
+            },
+            ProjectSubcommand::Autoload(command) => match &command.command {
+                ProjectAutoloadSubcommand::Add(args) => project_cmd::run_autoload_add(args),
+                ProjectAutoloadSubcommand::Remove(args) => project_cmd::run_autoload_remove(args),
+                ProjectAutoloadSubcommand::List(args) => project_cmd::run_autoload_list(args),
+            },
+            ProjectSubcommand::Input(command) => match &command.command {
+                ProjectInputSubcommand::Add(args) => project_cmd::run_input_add(cli, args),
+                ProjectInputSubcommand::Remove(args) => project_cmd::run_input_remove(cli, args),
+                ProjectInputSubcommand::List(args) => project_cmd::run_input_list(cli, args),
+            },
         },
         Commands::Scene(command) => match &command.command {
-            SceneSubcommand::New(args) => scene::run_new(cli, args),
+            SceneSubcommand::Create(args) => scene::run_create(cli, args),
+            SceneSubcommand::Build(args) => scene::run_build(cli, args),
             SceneSubcommand::Tree(args) => scene::run_tree(args),
-            SceneSubcommand::AddNode(args) => scene::run_add_node(args),
-            SceneSubcommand::Set(args) => scene::run_set(args),
+            SceneSubcommand::Node(command) => match &command.command {
+                SceneNodeSubcommand::Add(args) => scene::run_add_node(args),
+                SceneNodeSubcommand::SetProperty(args) => scene::run_set_property(args),
+            },
             SceneSubcommand::Save(args) => scene::run_save(args),
         },
         Commands::Asset(command) => match &command.command {
+            AssetSubcommand::Copy(args) => asset::run_copy(args),
             AssetSubcommand::Import(args) => asset::run_import(cli, args),
+            AssetSubcommand::Inspect(args) => asset::run_inspect(cli, args),
         },
-        Commands::Code(command) => match &command.command {
-            CodeSubcommand::Check(args) => code::run_check(cli, args),
+        Commands::Script(command) => match &command.command {
+            ScriptSubcommand::Create(args) => code::run_create(args),
+            ScriptSubcommand::Attach(args) => code::run_attach(cli, args),
+            ScriptSubcommand::Check(args) => code::run_check(cli, args),
+            ScriptSubcommand::CheckAll(args) => code::run_check_all(cli, args),
         },
-        Commands::Capture(args) => session::run_capture(args),
-        Commands::Serve(args) => session::run_serve(cli, args),
-        Commands::Status(args) => session::run_status(args),
-        Commands::Kill(args) => session::run_kill(args),
-        Commands::Play(command) => match &command.command {
-            PlaySubcommand::Run(args) => play::run_play(cli, args),
+        Commands::Daemon(command) => match &command.command {
+            DaemonSubcommand::Start(args) => session::run_start(cli, args),
+            DaemonSubcommand::Status(args) => session::run_status(args),
+            DaemonSubcommand::Stop(args) => session::run_stop(args),
+            DaemonSubcommand::Capture(args) => session::run_capture(args),
+            DaemonSubcommand::Input(args) => session::run_input(args),
+            DaemonSubcommand::Call(args) => session::run_call(args),
+            DaemonSubcommand::State(args) => session::run_state(args),
+        },
+        Commands::Run(command) => match &command.command {
+            RunSubcommand::Capture(args) => play::run_capture(cli, args),
+        },
+        Commands::Resource(command) => match &command.command {
+            ResourceSubcommand::Create(args) => resource::run_create(cli, args),
+            ResourceSubcommand::Inspect(args) => resource::run_inspect(cli, args),
+        },
+        Commands::Test(command) => match &command.command {
+            TestSubcommand::Run(args) => test_cmd::run(cli, args),
         },
         Commands::Export(command) => match &command.command {
             ExportSubcommand::Build(args) => export::run_build(cli, args),
@@ -155,36 +290,44 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn parses_top_level_init() {
-        let cli =
-            Cli::try_parse_from(["gdx", "init", "--path", "demo", "--name", "Demo", "--json"])
-                .unwrap();
+    fn parses_project_init() {
+        let cli = Cli::try_parse_from([
+            "gdx",
+            "project",
+            "init",
+            "--project",
+            "demo",
+            "--name",
+            "Demo",
+            "--json",
+        ])
+        .unwrap();
 
-        assert!(matches!(cli.command, Commands::Init(_)));
+        assert!(matches!(cli.command, Commands::Project(_)));
     }
 
     #[test]
-    fn rejects_removed_init_basic_subcommand() {
-        let err = Cli::try_parse_from(["gdx", "init", "basic", "--path", "demo", "--name", "Demo"])
-            .unwrap_err();
+    fn rejects_removed_top_level_init() {
+        let err =
+            Cli::try_parse_from(["gdx", "init", "--path", "demo", "--name", "Demo"]).unwrap_err();
 
-        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
     }
 
     #[test]
-    fn parses_project_setup() {
-        let cli = Cli::try_parse_from(["gdx", "project", "setup", "--project", "demo", "--json"])
+    fn parses_project_install() {
+        let cli = Cli::try_parse_from(["gdx", "project", "install", "--project", "demo", "--json"])
             .unwrap();
 
         assert!(matches!(cli.command, Commands::Project(_)));
     }
 
     #[test]
-    fn parses_scene_new() {
+    fn parses_scene_create() {
         let cli = Cli::try_parse_from([
             "gdx",
             "scene",
-            "new",
+            "create",
             "--project",
             "demo",
             "--out",
@@ -202,7 +345,52 @@ mod tests {
     }
 
     #[test]
-    fn rejects_removed_scene_build() {
+    fn parses_scene_node_set_property() {
+        let cli = Cli::try_parse_from([
+            "gdx",
+            "scene",
+            "node",
+            "set-property",
+            "--project",
+            "demo",
+            "--node",
+            "/Title",
+            "--property",
+            "text",
+            "--value",
+            "Hello",
+        ])
+        .unwrap();
+
+        assert!(matches!(cli.command, Commands::Scene(_)));
+    }
+
+    #[test]
+    fn parses_daemon_start() {
+        let cli =
+            Cli::try_parse_from(["gdx", "daemon", "start", "--project", "demo", "--json"]).unwrap();
+
+        assert!(matches!(cli.command, Commands::Daemon(_)));
+    }
+
+    #[test]
+    fn parses_run_capture() {
+        let cli = Cli::try_parse_from([
+            "gdx",
+            "run",
+            "capture",
+            "--project",
+            "demo",
+            "--out",
+            "shot.png",
+        ])
+        .unwrap();
+
+        assert!(matches!(cli.command, Commands::Run(_)));
+    }
+
+    #[test]
+    fn rejects_removed_scene_build_out_arg() {
         let err = Cli::try_parse_from([
             "gdx",
             "scene",
@@ -216,7 +404,134 @@ mod tests {
         ])
         .unwrap_err();
 
-        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn parses_scene_build() {
+        let cli = Cli::try_parse_from([
+            "gdx",
+            "scene",
+            "build",
+            "--project",
+            "demo",
+            "--spec",
+            "s.json",
+        ])
+        .unwrap();
+
+        assert!(matches!(cli.command, Commands::Scene(_)));
+    }
+
+    #[test]
+    fn parses_project_setting_autoload_input() {
+        for args in [
+            vec![
+                "gdx",
+                "project",
+                "setting",
+                "set",
+                "--project",
+                "demo",
+                "--section",
+                "application",
+                "--key",
+                "run/main_scene",
+                "--value",
+                "res://main.tscn",
+            ],
+            vec![
+                "gdx",
+                "project",
+                "autoload",
+                "add",
+                "--project",
+                "demo",
+                "--name",
+                "Game",
+                "--path",
+                "res://scripts/game.gd",
+            ],
+            vec![
+                "gdx",
+                "project",
+                "input",
+                "add",
+                "--project",
+                "demo",
+                "--action",
+                "ui_accept",
+                "--keycode",
+                "32",
+            ],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+
+            assert!(matches!(cli.command, Commands::Project(_)));
+        }
+    }
+
+    #[test]
+    fn parses_asset_script_resource_test_commands() {
+        for args in [
+            vec![
+                "gdx",
+                "asset",
+                "copy",
+                "--project",
+                "demo",
+                "--from",
+                "a.png",
+                "--to",
+                "res://assets/a.png",
+            ],
+            vec![
+                "gdx",
+                "script",
+                "create",
+                "--project",
+                "demo",
+                "--path",
+                "res://scripts/main.gd",
+            ],
+            vec![
+                "gdx",
+                "resource",
+                "inspect",
+                "--project",
+                "demo",
+                "--path",
+                "res://x.tres",
+            ],
+            vec![
+                "gdx",
+                "test",
+                "run",
+                "--project",
+                "demo",
+                "--path",
+                "res://tests/test.gd",
+            ],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Commands::Asset(_)
+                    | Commands::Script(_)
+                    | Commands::Resource(_)
+                    | Commands::Test(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_removed_top_level_daemon_commands() {
+        for command in ["serve", "status", "kill", "capture"] {
+            let err = Cli::try_parse_from(["gdx", command, "--project", "demo"]).unwrap_err();
+
+            assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
+        }
     }
 
     #[test]
@@ -224,7 +539,8 @@ mod tests {
         let err = Cli::try_parse_from([
             "gdx",
             "scene",
-            "set",
+            "node",
+            "set-property",
             "--project",
             "demo",
             "--node",
