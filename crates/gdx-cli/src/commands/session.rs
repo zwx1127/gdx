@@ -4,16 +4,13 @@ use clap::{ArgGroup, Args};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::commands::Cli;
+use crate::context::{validate_non_empty, validate_res_path, AppContext};
 use crate::daemon::{self, SpawnDaemon};
 use crate::error::{GdxError, GdxResult};
-use crate::project::{assert_project, ensure_parent_dir, godot_path_string, read_main_scene};
+use crate::project::{ensure_parent_dir, godot_path_string, read_main_scene};
 
 #[derive(Debug, Args)]
 pub struct StartArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub scene: Option<String>,
 
@@ -31,25 +28,16 @@ pub struct StartArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct StatusArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-}
+pub struct StatusArgs {}
 
 #[derive(Debug, Args)]
 pub struct StopArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub force: bool,
 }
 
 #[derive(Debug, Args)]
 pub struct CaptureArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub out: PathBuf,
 
@@ -65,9 +53,6 @@ pub struct CaptureArgs {
 ))]
 pub struct InputArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub keycode: Option<i64>,
 
     #[arg(long)]
@@ -76,7 +61,7 @@ pub struct InputArgs {
     #[arg(long)]
     pub mouse_motion: bool,
 
-    #[arg(long, num_args = 2)]
+    #[arg(long, num_args = 2, allow_hyphen_values = true)]
     pub position: Option<Vec<f64>>,
 
     #[arg(long, default_value_t = true)]
@@ -85,9 +70,6 @@ pub struct InputArgs {
 
 #[derive(Debug, Args)]
 pub struct CallArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub target: String,
 
@@ -101,9 +83,6 @@ pub struct CallArgs {
 #[derive(Debug, Args)]
 pub struct StateArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub target: String,
 
     #[arg(long)]
@@ -113,15 +92,10 @@ pub struct StateArgs {
     pub property: Option<String>,
 }
 
-pub fn run_start(cli: &Cli, args: &StartArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let scene = resolve_scene(&project.root, args.scene.as_deref())?;
-    if !scene.starts_with("res://") {
-        return Err(GdxError::user(
-            "invalid_scene",
-            "--scene must be a res:// path",
-        ));
-    }
+    validate_res_path("--scene", &scene)?;
     if args.width == 0 || args.height == 0 {
         return Err(GdxError::user(
             "invalid_resolution",
@@ -147,7 +121,7 @@ pub fn run_start(cli: &Cli, args: &StartArgs) -> GdxResult<serde_json::Value> {
         }
     }
 
-    let binary = daemon::locate_godot(cli.godot.as_deref())?;
+    let binary = ctx.locate_godot()?;
     let port = match args.port {
         Some(port) => port,
         None => daemon::find_free_port()?,
@@ -186,8 +160,8 @@ fn resolve_scene(project: &std::path::Path, explicit: Option<&str>) -> GdxResult
     })
 }
 
-pub fn run_status(args: &StatusArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     match daemon::read_session(&project.root) {
         Ok(session) => {
             let running = daemon::ping_session(&session);
@@ -209,8 +183,8 @@ pub fn run_status(args: &StatusArgs) -> GdxResult<serde_json::Value> {
     }
 }
 
-pub fn run_stop(args: &StopArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_stop(ctx: &AppContext, args: &StopArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let session = match daemon::read_session(&project.root) {
         Ok(session) => session,
         Err(_) => {
@@ -237,17 +211,9 @@ pub fn run_stop(args: &StopArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_capture(args: &CaptureArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
-    let out = if args.out.is_absolute() {
-        args.out.clone()
-    } else {
-        std::env::current_dir()
-            .map_err(|err| {
-                GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
-            })?
-            .join(&args.out)
-    };
+pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
+    let out = ctx.abs_path(&args.out);
     ensure_parent_dir(&out)?;
     let result = daemon::rpc(
         &project.root,
@@ -260,15 +226,15 @@ pub fn run_capture(args: &CaptureArgs) -> GdxResult<serde_json::Value> {
     )?;
     Ok(json!({
         "ok": true,
-        "command": "daemon.capture",
+        "command": "capture.daemon",
         "project": godot_path_string(&project.root),
         "capture": godot_path_string(&out),
         "result": result
     }))
 }
 
-pub fn run_input(args: &InputArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_input(ctx: &AppContext, args: &InputArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let position = args.position.clone().unwrap_or_else(|| vec![0.0, 0.0]);
     let params = if let Some(keycode) = args.keycode {
         json!({ "kind": "key", "keycode": keycode, "pressed": args.pressed })
@@ -285,25 +251,15 @@ pub fn run_input(args: &InputArgs) -> GdxResult<serde_json::Value> {
     let result = daemon::rpc(&project.root, "input_event", params, 10)?;
     Ok(json!({
         "ok": true,
-        "command": "daemon.input",
+        "command": "input.send",
         "project": godot_path_string(&project.root),
         "result": result
     }))
 }
 
-pub fn run_call(args: &CallArgs) -> GdxResult<serde_json::Value> {
-    if args.target.trim().is_empty() {
-        return Err(GdxError::user(
-            "invalid_target",
-            "--target must not be empty",
-        ));
-    }
-    if args.method.trim().is_empty() {
-        return Err(GdxError::user(
-            "invalid_method",
-            "--method must not be empty",
-        ));
-    }
+pub fn run_call(ctx: &AppContext, args: &CallArgs) -> GdxResult<serde_json::Value> {
+    validate_non_empty("target", &args.target)?;
+    validate_non_empty("method", &args.method)?;
     let call_args: serde_json::Value = serde_json::from_str(&args.args_json).map_err(|err| {
         GdxError::user(
             "invalid_args_json",
@@ -316,7 +272,7 @@ pub fn run_call(args: &CallArgs) -> GdxResult<serde_json::Value> {
             "--args-json must be a JSON array",
         ));
     }
-    let project = assert_project(&args.project)?;
+    let project = ctx.project()?;
     let result = daemon::rpc(
         &project.root,
         "call_method",
@@ -329,20 +285,15 @@ pub fn run_call(args: &CallArgs) -> GdxResult<serde_json::Value> {
     )?;
     Ok(json!({
         "ok": true,
-        "command": "daemon.call",
+        "command": "call.invoke",
         "project": godot_path_string(&project.root),
         "result": result
     }))
 }
 
-pub fn run_state(args: &StateArgs) -> GdxResult<serde_json::Value> {
-    if args.target.trim().is_empty() {
-        return Err(GdxError::user(
-            "invalid_target",
-            "--target must not be empty",
-        ));
-    }
-    let project = assert_project(&args.project)?;
+pub fn run_state(ctx: &AppContext, args: &StateArgs) -> GdxResult<serde_json::Value> {
+    validate_non_empty("target", &args.target)?;
+    let project = ctx.project()?;
     let result = daemon::rpc(
         &project.root,
         "get_state",
@@ -355,7 +306,7 @@ pub fn run_state(args: &StateArgs) -> GdxResult<serde_json::Value> {
     )?;
     Ok(json!({
         "ok": true,
-        "command": "daemon.state",
+        "command": "state.get",
         "project": godot_path_string(&project.root),
         "result": result
     }))

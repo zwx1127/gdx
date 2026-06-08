@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use crate::constants::GDX_DAEMON_SERVER_RES;
 use crate::error::{GdxError, GdxResult};
-use crate::godot;
 use crate::project::{ensure_dir, godot_path_string};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,8 +270,4 @@ pub fn kill_process(pid: u32, force: bool) -> GdxResult<()> {
             ))
         }
     }
-}
-
-pub fn locate_godot(explicit: Option<&Path>) -> GdxResult<PathBuf> {
-    godot::locate_godot(explicit)
 }

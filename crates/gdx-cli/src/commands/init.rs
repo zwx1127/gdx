@@ -9,13 +9,14 @@ use crate::constants::{
     GDX_RUNTIME_CAPTURE_RUNNER_GD, GDX_RUNTIME_CAPTURE_RUNNER_TSCN, GDX_TOOLS_AUTOMATION_GD,
     GDX_TOOLS_CREATE_SCENE_GD,
 };
+use crate::context::AppContext;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
 
 #[derive(Debug, Args)]
-pub struct InitArgs {
+pub struct CreateArgs {
     #[arg(long)]
-    pub project: PathBuf,
+    pub path: PathBuf,
 
     #[arg(long)]
     pub name: String,
@@ -56,7 +57,7 @@ const ADDON_FILES: &[ResourceFile] = &[
     },
 ];
 
-pub fn run(args: &InitArgs) -> GdxResult<serde_json::Value> {
+pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::Value> {
     if args.name.trim().is_empty() {
         return Err(GdxError::user(
             "invalid_name",
@@ -64,15 +65,7 @@ pub fn run(args: &InitArgs) -> GdxResult<serde_json::Value> {
         ));
     }
 
-    let target = if args.project.is_absolute() {
-        args.project.clone()
-    } else {
-        std::env::current_dir()
-            .map_err(|err| {
-                GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
-            })?
-            .join(&args.project)
-    };
+    let target = ctx.abs_path(&args.path);
 
     if target.exists()
         && target
@@ -106,7 +99,7 @@ pub fn run(args: &InitArgs) -> GdxResult<serde_json::Value> {
 
     Ok(json!({
         "ok": true,
-        "command": "project.init",
+        "command": "project.create",
         "project": godot_path_string(&target),
         "files": files
     }))
@@ -170,13 +163,14 @@ mod tests {
     fn init_creates_minimal_project_with_gdx_addons() {
         let path = temp_project("minimal");
         let _ = fs::remove_dir_all(&path);
-        let args = InitArgs {
-            project: path.clone(),
+        let ctx = AppContext::new(None, None).unwrap();
+        let args = CreateArgs {
+            path: path.clone(),
             name: "hello".to_string(),
             force: false,
         };
 
-        run(&args).unwrap();
+        run_create(&ctx, &args).unwrap();
 
         let project = fs::read_to_string(path.join("project.godot")).unwrap();
         assert!(project.contains("config/name=\"hello\""));
@@ -200,13 +194,14 @@ mod tests {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         fs::write(path.join("user.txt"), "keep").unwrap();
-        let args = InitArgs {
-            project: path.clone(),
+        let ctx = AppContext::new(None, None).unwrap();
+        let args = CreateArgs {
+            path: path.clone(),
             name: "hello".to_string(),
             force: false,
         };
 
-        let err = run(&args).unwrap_err();
+        let err = run_create(&ctx, &args).unwrap_err();
 
         assert_eq!(err.error, "target_not_empty");
         assert_eq!(fs::read_to_string(path.join("user.txt")).unwrap(), "keep");

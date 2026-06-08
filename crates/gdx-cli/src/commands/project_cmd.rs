@@ -1,18 +1,17 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clap::Args;
 use serde_json::json;
 use walkdir::WalkDir;
 
-use crate::commands::Cli;
 use crate::constants::{
     GDX_DAEMON_SERVER_GD, GDX_DAEMON_SERVER_TSCN, GDX_RUNTIME_CAPTURE_RUNNER_GD,
     GDX_RUNTIME_CAPTURE_RUNNER_TSCN, GDX_TOOLS_AUTOMATION_GD, GDX_TOOLS_CREATE_SCENE_GD,
 };
+use crate::context::{validate_non_empty, validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
-use crate::godot;
 use crate::project::{
-    assert_project, godot_path_string, list_project_settings, read_main_scene, read_project_name,
+    godot_path_string, list_project_settings, read_main_scene, read_project_name,
     read_project_setting, remove_project_setting, set_project_setting_quoted,
     set_project_setting_raw,
 };
@@ -20,25 +19,16 @@ use crate::project::{
 use super::init::{ensure_gdx_gitignore, install_gdx_addons};
 
 #[derive(Debug, Args)]
-pub struct InstallArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-}
+pub struct InstallArgs {}
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long, default_value_t = 500)]
     pub max_files: usize,
 }
 
 #[derive(Debug, Args)]
 pub struct SettingGetArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub section: String,
 
@@ -48,9 +38,6 @@ pub struct SettingGetArgs {
 
 #[derive(Debug, Args)]
 pub struct SettingSetArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub section: String,
 
@@ -67,17 +54,11 @@ pub struct SettingSetArgs {
 #[derive(Debug, Args)]
 pub struct SettingListArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub section: String,
 }
 
 #[derive(Debug, Args)]
 pub struct AutoloadAddArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub name: String,
 
@@ -91,23 +72,14 @@ pub struct AutoloadAddArgs {
 #[derive(Debug, Args)]
 pub struct AutoloadRemoveArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub name: String,
 }
 
 #[derive(Debug, Args)]
-pub struct AutoloadListArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-}
+pub struct AutoloadListArgs {}
 
 #[derive(Debug, Args)]
 pub struct InputAddArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub action: String,
 
@@ -124,20 +96,14 @@ pub struct InputAddArgs {
 #[derive(Debug, Args)]
 pub struct InputRemoveArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub action: String,
 }
 
 #[derive(Debug, Args)]
-pub struct InputListArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-}
+pub struct InputListArgs {}
 
-pub fn run_install(args: &InstallArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_install(ctx: &AppContext, _args: &InstallArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let mut files = install_gdx_addons(&project.root)?;
     if ensure_gdx_gitignore(&project.root)? {
         files.push(".gitignore".to_string());
@@ -152,8 +118,8 @@ pub fn run_install(args: &InstallArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_inspect(args: &InspectArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let mut scenes = Vec::new();
     let mut scripts = Vec::new();
     let mut assets = Vec::new();
@@ -225,12 +191,12 @@ pub fn run_inspect(args: &InspectArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_setting_get(args: &SettingGetArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_setting_get(ctx: &AppContext, args: &SettingGetArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let value = read_project_setting(&project.root, &args.section, &args.key)?;
     Ok(json!({
         "ok": true,
-        "command": "project.setting.get",
+        "command": "setting.get",
         "project": godot_path_string(&project.root),
         "section": args.section,
         "key": args.key,
@@ -238,8 +204,8 @@ pub fn run_setting_get(args: &SettingGetArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_setting_set(args: &SettingSetArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_setting_set(ctx: &AppContext, args: &SettingSetArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     validate_non_empty("section", &args.section)?;
     validate_non_empty("key", &args.key)?;
     if args.raw {
@@ -249,7 +215,7 @@ pub fn run_setting_set(args: &SettingSetArgs) -> GdxResult<serde_json::Value> {
     }
     Ok(json!({
         "ok": true,
-        "command": "project.setting.set",
+        "command": "setting.set",
         "project": godot_path_string(&project.root),
         "section": args.section,
         "key": args.key,
@@ -257,27 +223,22 @@ pub fn run_setting_set(args: &SettingSetArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_setting_list(args: &SettingListArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_setting_list(ctx: &AppContext, args: &SettingListArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let settings = list_project_settings(&project.root, &args.section)?;
     Ok(json!({
         "ok": true,
-        "command": "project.setting.list",
+        "command": "setting.list",
         "project": godot_path_string(&project.root),
         "section": args.section,
         "settings": settings
     }))
 }
 
-pub fn run_autoload_add(args: &AutoloadAddArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_autoload_add(ctx: &AppContext, args: &AutoloadAddArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     validate_non_empty("name", &args.name)?;
-    if !args.path.starts_with("res://") {
-        return Err(GdxError::user(
-            "invalid_path",
-            "--path must be a res:// path",
-        ));
-    }
+    validate_res_path("--path", &args.path)?;
     let value = if args.global {
         format!("*{}", args.path)
     } else {
@@ -286,7 +247,7 @@ pub fn run_autoload_add(args: &AutoloadAddArgs) -> GdxResult<serde_json::Value> 
     set_project_setting_quoted(&project.root, "autoload", &args.name, &value)?;
     Ok(json!({
         "ok": true,
-        "command": "project.autoload.add",
+        "command": "autoload.add",
         "project": godot_path_string(&project.root),
         "name": args.name,
         "path": args.path,
@@ -294,32 +255,38 @@ pub fn run_autoload_add(args: &AutoloadAddArgs) -> GdxResult<serde_json::Value> 
     }))
 }
 
-pub fn run_autoload_remove(args: &AutoloadRemoveArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_autoload_remove(
+    ctx: &AppContext,
+    args: &AutoloadRemoveArgs,
+) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     validate_non_empty("name", &args.name)?;
     let removed = remove_project_setting(&project.root, "autoload", &args.name)?;
     Ok(json!({
         "ok": true,
-        "command": "project.autoload.remove",
+        "command": "autoload.remove",
         "project": godot_path_string(&project.root),
         "name": args.name,
         "removed": removed
     }))
 }
 
-pub fn run_autoload_list(args: &AutoloadListArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_autoload_list(
+    ctx: &AppContext,
+    _args: &AutoloadListArgs,
+) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let autoloads = list_project_settings(&project.root, "autoload")?;
     Ok(json!({
         "ok": true,
-        "command": "project.autoload.list",
+        "command": "autoload.list",
         "project": godot_path_string(&project.root),
         "autoloads": autoloads
     }))
 }
 
-pub fn run_input_add(cli: &Cli, args: &InputAddArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_input_add(ctx: &AppContext, args: &InputAddArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     validate_non_empty("action", &args.action)?;
     if args.keycode.is_none() && args.mouse_button.is_none() {
         return Err(GdxError::user(
@@ -327,9 +294,8 @@ pub fn run_input_add(cli: &Cli, args: &InputAddArgs) -> GdxResult<serde_json::Va
             "Pass --keycode <code> or --mouse-button <code>",
         ));
     }
-    let result = run_project_input(
-        cli,
-        project.root,
+    let result = ctx.run_automation(
+        project.root.clone(),
         "project_input_add",
         json!({
             "action": args.action,
@@ -337,63 +303,42 @@ pub fn run_input_add(cli: &Cli, args: &InputAddArgs) -> GdxResult<serde_json::Va
             "mouse_button": args.mouse_button,
             "deadzone": args.deadzone
         }),
+        30,
     )?;
     Ok(json!({
         "ok": true,
-        "command": "project.input.add",
+        "command": "input-map.add",
+        "project": godot_path_string(&project.root),
         "result": result
     }))
 }
 
-pub fn run_input_remove(cli: &Cli, args: &InputRemoveArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_input_remove(ctx: &AppContext, args: &InputRemoveArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     validate_non_empty("action", &args.action)?;
-    let result = run_project_input(
-        cli,
-        project.root,
+    let result = ctx.run_automation(
+        project.root.clone(),
         "project_input_remove",
         json!({ "action": args.action }),
+        30,
     )?;
     Ok(json!({
         "ok": true,
-        "command": "project.input.remove",
+        "command": "input-map.remove",
+        "project": godot_path_string(&project.root),
         "result": result
     }))
 }
 
-pub fn run_input_list(cli: &Cli, args: &InputListArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
-    let result = run_project_input(cli, project.root, "project_input_list", json!({}))?;
+pub fn run_input_list(ctx: &AppContext, _args: &InputListArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
+    let result = ctx.run_automation(project.root.clone(), "project_input_list", json!({}), 30)?;
     Ok(json!({
         "ok": true,
-        "command": "project.input.list",
+        "command": "input-map.list",
+        "project": godot_path_string(&project.root),
         "result": result
     }))
-}
-
-fn run_project_input(
-    cli: &Cli,
-    project: PathBuf,
-    action: &str,
-    params: serde_json::Value,
-) -> GdxResult<serde_json::Value> {
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
-    let result = godot::run_automation(binary, project, action, params, 30)?;
-    if result.status_code != 0 {
-        return Err(godot::godot_failed(&result));
-    }
-    Ok(result.last_json.unwrap_or(serde_json::Value::Null))
-}
-
-fn validate_non_empty(name: &str, value: &str) -> GdxResult<()> {
-    if value.trim().is_empty() {
-        Err(GdxError::user(
-            format!("invalid_{name}"),
-            format!("{name} must not be empty"),
-        ))
-    } else {
-        Ok(())
-    }
 }
 
 fn gdx_addons_installed(project: &Path) -> bool {

@@ -37,36 +37,34 @@ Invoke-Native cargo build -p gdx-cli
 
 $Common = @("--godot", $Godot)
 
-Invoke-Native $Bin @Common doctor --json
-Invoke-Native $Bin project init --project $Work --name hello --json
+Invoke-Native $Bin @Common doctor
+Invoke-Native $Bin project create --path $Work --name hello
 
 if (!(Test-Path (Join-Path $Work "project.godot"))) { throw "project.godot was not created" }
 if (!(Test-Path (Join-Path $Work "addons\gdx_tools\create_scene.gd"))) { throw "create_scene.gd was not created" }
 if (!(Test-Path (Join-Path $Work "addons\gdx_runtime\capture_runner.gd"))) { throw "capture_runner.gd was not created" }
 if (Test-Path (Join-Path $Work "scripts\main.gd")) { throw "scripts\main.gd should not be created by init" }
 
-Invoke-Native $Bin @Common scene create `
-    --project $Work `
+Invoke-Native $Bin @Common --project $Work scene create `
     --out "res://scenes/main.tscn" `
     --root-type Node2D `
     --name Main `
-    --set-main `
-    --json
+    --set-main
 
 if (!(Test-Path (Join-Path $Work "scenes\main.tscn"))) { throw "main.tscn was not created" }
 
-Invoke-Native $Bin @Common asset import --project $Work --json
+Invoke-Native $Bin @Common --project $Work asset import
 
 try {
-    Invoke-Native $Bin @Common daemon start --project $Work --restart --json
-    Invoke-Native $Bin scene node add --project $Work --parent "/" --type Label --name Title --json
-    Invoke-Native $Bin scene node set-property --project $Work --node "/Title" --property text --value "Hello gdx" --json
-    Invoke-Native $Bin scene node set-property --project $Work --node "/Title" --property position --vec2 40 40 --json
-    Invoke-Native $Bin scene save --project $Work --json
-    Invoke-Native $Bin daemon capture --project $Work --out $Shot --frames 10 --json
+    Invoke-Native $Bin @Common --project $Work daemon start --restart
+    Invoke-Native $Bin --project $Work node create --parent "/" --type Label --name Title
+    Invoke-Native $Bin --project $Work node set --node "/Title" --property text --value "Hello gdx"
+    Invoke-Native $Bin --project $Work node set --node "/Title" --property position --vec2 40 40
+    Invoke-Native $Bin --project $Work scene save
+    Invoke-Native $Bin --project $Work capture daemon --out $Shot --frames 10
 }
 finally {
-    & $Bin daemon stop --project $Work --force --json
+    & $Bin --project $Work daemon stop --force
 }
 
 $ShotInfo = Get-Item -LiteralPath $Shot

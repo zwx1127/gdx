@@ -3,14 +3,14 @@ use serde_json::json;
 
 use crate::error::GdxError;
 
-pub fn emit_ok<T: Serialize>(_json: bool, value: T) {
+pub fn emit_ok<T: Serialize>(value: T) {
     println!(
         "{}",
         serde_json::to_string_pretty(&value).expect("success output must serialize")
     );
 }
 
-pub fn emit_err(_json: bool, error: GdxError) -> ! {
+pub fn emit_err(error: GdxError) -> ! {
     let mut value = json!({
         "ok": false,
         "error": error.error,

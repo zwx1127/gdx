@@ -30,6 +30,38 @@ function Invoke-Native {
     }
 }
 
+function Assert-ImageHasVisibleContent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    Add-Type -AssemblyName System.Drawing
+    $Bitmap = [System.Drawing.Bitmap]::new($Path)
+    try {
+        $Background = $Bitmap.GetPixel(0, 0)
+        $DifferentPixels = 0
+        $StepX = 4
+        $StepY = 4
+        for ($Y = 0; $Y -lt $Bitmap.Height; $Y += $StepY) {
+            for ($X = 0; $X -lt $Bitmap.Width; $X += $StepX) {
+                $Pixel = $Bitmap.GetPixel($X, $Y)
+                $Delta = [Math]::Abs($Pixel.R - $Background.R) + [Math]::Abs($Pixel.G - $Background.G) + [Math]::Abs($Pixel.B - $Background.B)
+                if ($Delta -gt 24) {
+                    $DifferentPixels += 1
+                    if ($DifferentPixels -ge 50) {
+                        return
+                    }
+                }
+            }
+        }
+        throw "Capture does not contain visible rendered 3D content: $Path"
+    }
+    finally {
+        $Bitmap.Dispose()
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($Godot)) {
     throw "Set GDX_GODOT or pass -Godot with a Godot 4.x executable path."
 }
@@ -42,40 +74,52 @@ Invoke-Native cargo build -p gdx-cli
 
 $Common = @("--godot", $Godot)
 
-Invoke-Native $Bin project init --project $Work --name daemon3d --json
-Invoke-Native $Bin @Common scene create `
-    --project $Work `
+Invoke-Native $Bin project create --path $Work --name daemon3d
+Invoke-Native $Bin @Common --project $Work scene create `
     --out "res://scenes/main_3d.tscn" `
     --root-type Node3D `
     --name Main3D `
-    --set-main `
-    --json
-Invoke-Native $Bin @Common asset import --project $Work --json
+    --set-main
+Invoke-Native $Bin @Common --project $Work asset import
+
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $Work "meshes"))
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $Work "materials"))
+$MaterialProps = Join-Path $Work "box_material.json"
+Set-Content -LiteralPath $MaterialProps -Encoding ASCII -Value '{ "albedo_color": { "color": [1.0, 0.45, 0.1, 1.0] } }'
+Invoke-Native $Bin @Common --project $Work resource create --type BoxMesh --out "res://meshes/box.tres"
+Invoke-Native $Bin @Common --project $Work resource create --type StandardMaterial3D --out "res://materials/box_material.tres" --properties $MaterialProps
 
 try {
-    Invoke-Native $Bin @Common daemon start `
-        --project $Work `
+    Invoke-Native $Bin @Common --project $Work daemon start `
         --width 1280 `
         --height 720 `
-        --restart `
-        --json
+        --restart
 
-    Invoke-Native $Bin scene tree --project $Work --json
-    Invoke-Native $Bin scene node add --project $Work --parent "/" --type MeshInstance3D --name AddedBox --json
+    Invoke-Native $Bin --project $Work scene tree
+    Invoke-Native $Bin --project $Work node create --parent "/" --type Camera3D --name Camera
+    Invoke-Native $Bin --project $Work node set --node "/Camera" --property position --vec3 0 3 6
+    Invoke-Native $Bin --project $Work node set --node "/Camera" --property rotation_degrees --vec3 -25 0 0
+    Invoke-Native $Bin --project $Work node set --node "/Camera" --property current --bool true
+    Invoke-Native $Bin --project $Work node create --parent "/" --type DirectionalLight3D --name Sun
+    Invoke-Native $Bin --project $Work node set --node "/Sun" --property rotation_degrees --vec3 -45 -30 0
+    Invoke-Native $Bin --project $Work node create --parent "/" --type MeshInstance3D --name AddedBox
 
-    Invoke-Native $Bin scene node set-property --project $Work --node "/AddedBox" --property position --vec3 2 0.5 0 --json
-    Invoke-Native $Bin scene save --project $Work --json
+    Invoke-Native $Bin --project $Work node set --node "/AddedBox" --property mesh --resource "res://meshes/box.tres"
+    Invoke-Native $Bin --project $Work node set --node "/AddedBox" --property material_override --resource "res://materials/box_material.tres"
+    Invoke-Native $Bin --project $Work node set --node "/AddedBox" --property position --vec3 0 0.5 0
+    Invoke-Native $Bin --project $Work scene save
 
     $SceneText = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Work "scenes\main_3d.tscn")
     if ($SceneText -notmatch "AddedBox") { throw "Saved scene does not include AddedBox" }
 
-    Invoke-Native $Bin daemon capture --project $Work --out $Shot --frames 10 --json
+    Invoke-Native $Bin --project $Work capture daemon --out $Shot --frames 10
 
     $ShotInfo = Get-Item -LiteralPath $Shot
     if ($ShotInfo.Length -le 0) { throw "Capture is empty: $Shot" }
+    Assert-ImageHasVisibleContent -Path $Shot
 }
 finally {
-    & $Bin daemon stop --project $Work --force --json
+    & $Bin --project $Work daemon stop --force
 }
 
 Write-Host "GDX DAEMON 3D E2E PASS: $Shot"

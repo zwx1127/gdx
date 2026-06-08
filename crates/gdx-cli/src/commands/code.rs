@@ -1,19 +1,14 @@
-use std::fs;
-use std::path::PathBuf;
-
 use clap::Args;
 use serde_json::json;
+use std::fs;
 
-use crate::commands::Cli;
+use crate::context::{validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{self, GodotCommand};
-use crate::project::{assert_project, ensure_parent_dir, godot_path_string, res_to_abs};
+use crate::project::{ensure_parent_dir, godot_path_string, res_to_abs};
 
 #[derive(Debug, Args)]
 pub struct CreateArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub path: String,
 
@@ -30,9 +25,6 @@ pub struct CreateArgs {
 #[derive(Debug, Args)]
 pub struct AttachArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub scene: String,
 
     #[arg(long)]
@@ -47,35 +39,24 @@ pub struct AttachArgs {
 
 #[derive(Debug, Args)]
 pub struct CheckArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     pub script_path: String,
 }
 
 #[derive(Debug, Args)]
 pub struct CheckAllArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long, default_value = "res://")]
     pub root: String,
 }
 
-pub fn run_create(args: &CreateArgs) -> GdxResult<serde_json::Value> {
-    if !args.path.starts_with("res://") {
-        return Err(GdxError::user(
-            "invalid_path",
-            "--path must be a res:// path",
-        ));
-    }
+pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::Value> {
+    validate_res_path("--path", &args.path)?;
     if args.extends.trim().is_empty() {
         return Err(GdxError::user(
             "invalid_extends",
             "--extends must not be empty",
         ));
     }
-    let project = assert_project(&args.project)?;
+    let project = ctx.project()?;
     let script_abs = res_to_abs(&project.root, &args.path)?;
     if script_abs.exists() && !args.force {
         return Err(GdxError::user(
@@ -111,16 +92,14 @@ pub fn run_create(args: &CreateArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_attach(cli: &Cli, args: &AttachArgs) -> GdxResult<serde_json::Value> {
+pub fn run_attach(ctx: &AppContext, args: &AttachArgs) -> GdxResult<serde_json::Value> {
     validate_res_path("--scene", &args.scene)?;
     validate_res_path("--script", &args.script)?;
     if let Some(out) = &args.out {
         validate_res_path("--out", out)?;
     }
-    let project = assert_project(&args.project)?;
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
-    let result = godot::run_automation(
-        binary,
+    let project = ctx.project()?;
+    let result = ctx.run_automation(
         project.root.clone(),
         "script_attach",
         json!({
@@ -131,20 +110,17 @@ pub fn run_attach(cli: &Cli, args: &AttachArgs) -> GdxResult<serde_json::Value> 
         }),
         60,
     )?;
-    if result.status_code != 0 {
-        return Err(godot::godot_failed(&result));
-    }
     Ok(json!({
         "ok": true,
         "command": "script.attach",
         "project": godot_path_string(&project.root),
-        "result": result.last_json
+        "result": result
     }))
 }
 
-pub fn run_check(cli: &Cli, args: &CheckArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
+pub fn run_check(ctx: &AppContext, args: &CheckArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
+    let binary = ctx.locate_godot()?;
     let result = godot::run(GodotCommand {
         binary,
         project: project.root.clone(),
@@ -176,35 +152,19 @@ pub fn run_check(cli: &Cli, args: &CheckArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_check_all(cli: &Cli, args: &CheckAllArgs) -> GdxResult<serde_json::Value> {
+pub fn run_check_all(ctx: &AppContext, args: &CheckAllArgs) -> GdxResult<serde_json::Value> {
     validate_res_path("--root", &args.root)?;
-    let project = assert_project(&args.project)?;
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
-    let result = godot::run_automation(
-        binary,
+    let project = ctx.project()?;
+    let result = ctx.run_automation(
         project.root.clone(),
         "script_check_all",
         json!({ "root": args.root }),
         120,
     )?;
-    if result.status_code != 0 {
-        return Err(godot::godot_failed(&result));
-    }
     Ok(json!({
         "ok": true,
         "command": "script.check-all",
         "project": godot_path_string(&project.root),
-        "result": result.last_json
+        "result": result
     }))
-}
-
-fn validate_res_path(label: &str, value: &str) -> GdxResult<()> {
-    if value.starts_with("res://") {
-        Ok(())
-    } else {
-        Err(GdxError::user(
-            "invalid_res_path",
-            format!("{label} must be a res:// path"),
-        ))
-    }
 }

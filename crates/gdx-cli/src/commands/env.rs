@@ -1,13 +1,12 @@
 use serde_json::json;
 
-use crate::commands::Cli;
+use crate::context::AppContext;
 use crate::error::{GdxError, GdxResult};
-use crate::godot;
 use crate::project::godot_path_string;
 
-pub fn run(cli: &Cli) -> GdxResult<serde_json::Value> {
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
-    let version = godot::run_version(&binary, 10)?;
+pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
+    let binary = ctx.locate_godot()?;
+    let version = crate::godot::run_version(&binary, 10)?;
     if !version.starts_with('4') {
         return Err(GdxError::validation(
             "unsupported_godot_version",

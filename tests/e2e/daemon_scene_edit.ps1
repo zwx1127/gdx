@@ -44,43 +44,39 @@ $Common = @("--godot", $Godot)
 
 [void](New-Item -ItemType Directory -Force -Path $Work)
 Set-Content -LiteralPath (Join-Path $Work "project.godot") -Encoding UTF8 -Value "config_version=5`n`n[application]`nconfig/name=`"existing`"`n"
-Invoke-Native $Bin project install --project $Work --json
-Invoke-Native $Bin project inspect --project $Work --json
-Invoke-Native $Bin @Common scene create `
-    --project $Work `
+Invoke-Native $Bin --project $Work project install
+Invoke-Native $Bin --project $Work project inspect
+Invoke-Native $Bin @Common --project $Work scene create `
     --out "res://scenes/main.tscn" `
     --root-type Node2D `
     --name Main `
-    --set-main `
-    --json
-Invoke-Native $Bin @Common asset import --project $Work --json
+    --set-main
+Invoke-Native $Bin @Common --project $Work asset import
 
 try {
-    Invoke-Native $Bin @Common daemon start `
-        --project $Work `
+    Invoke-Native $Bin @Common --project $Work daemon start `
         --width 1280 `
         --height 720 `
-        --restart `
-        --json
+        --restart
 
-    Invoke-Native $Bin daemon status --project $Work --json
-    Invoke-Native $Bin scene tree --project $Work --json
-    Invoke-Native $Bin scene node add --project $Work --parent "/" --type Label --name Subtitle --json
-    Invoke-Native $Bin scene node set-property --project $Work --node "/Subtitle" --property text --value "Edited by daemon" --json
-    Invoke-Native $Bin scene node set-property --project $Work --node "/Subtitle" --property position --vec2 40 90 --json
-    Invoke-Native $Bin scene save --project $Work --json
+    Invoke-Native $Bin --project $Work daemon status
+    Invoke-Native $Bin --project $Work scene tree
+    Invoke-Native $Bin --project $Work node create --parent "/" --type Label --name Subtitle
+    Invoke-Native $Bin --project $Work node set --node "/Subtitle" --property text --value "Edited by daemon"
+    Invoke-Native $Bin --project $Work node set --node "/Subtitle" --property position --vec2 40 90
+    Invoke-Native $Bin --project $Work scene save
 
     $SceneText = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Work "scenes\main.tscn")
     if ($SceneText -notmatch "Subtitle") { throw "Saved scene does not include Subtitle" }
     if ($SceneText -notmatch "Edited by daemon") { throw "Saved scene does not include edited text" }
 
-    Invoke-Native $Bin daemon capture --project $Work --out $Shot --frames 10 --json
+    Invoke-Native $Bin --project $Work capture daemon --out $Shot --frames 10
 
     $ShotInfo = Get-Item -LiteralPath $Shot
     if ($ShotInfo.Length -le 0) { throw "Capture is empty: $Shot" }
 }
 finally {
-    & $Bin daemon stop --project $Work --force --json
+    & $Bin --project $Work daemon stop --force
 }
 
 Write-Host "GDX MVP-1 DAEMON E2E PASS: $Shot"

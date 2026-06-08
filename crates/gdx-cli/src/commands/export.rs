@@ -3,16 +3,13 @@ use std::path::PathBuf;
 use clap::Args;
 use serde_json::json;
 
-use crate::commands::Cli;
+use crate::context::{validate_non_empty, AppContext};
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{self, GodotCommand};
-use crate::project::{assert_project, godot_path_string};
+use crate::project::godot_path_string;
 
 #[derive(Debug, Args)]
 pub struct BuildArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub preset: String,
 
@@ -20,14 +17,9 @@ pub struct BuildArgs {
     pub out: PathBuf,
 }
 
-pub fn run_build(cli: &Cli, args: &BuildArgs) -> GdxResult<serde_json::Value> {
-    if args.preset.trim().is_empty() {
-        return Err(GdxError::user(
-            "invalid_preset",
-            "Export preset must not be empty",
-        ));
-    }
-    let project = assert_project(&args.project)?;
+pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Value> {
+    validate_non_empty("preset", &args.preset)?;
+    let project = ctx.project()?;
     let presets = project.root.join("export_presets.cfg");
     if !presets.is_file() {
         return Err(GdxError::user(
@@ -36,7 +28,8 @@ pub fn run_build(cli: &Cli, args: &BuildArgs) -> GdxResult<serde_json::Value> {
         )
         .with_suggestion("Create export_presets.cfg in Godot before running export build."));
     }
-    if let Some(parent) = args.out.parent() {
+    let out = ctx.abs_path(&args.out);
+    if let Some(parent) = out.parent() {
         if !parent.as_os_str().is_empty() && !parent.is_dir() {
             return Err(GdxError::user(
                 "export_dir_not_found",
@@ -45,16 +38,7 @@ pub fn run_build(cli: &Cli, args: &BuildArgs) -> GdxResult<serde_json::Value> {
         }
     }
 
-    let out = if args.out.is_absolute() {
-        args.out.clone()
-    } else {
-        std::env::current_dir()
-            .map_err(|err| {
-                GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
-            })?
-            .join(&args.out)
-    };
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
+    let binary = ctx.locate_godot()?;
     let result = godot::run(GodotCommand {
         binary,
         project: project.root.clone(),

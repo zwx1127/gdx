@@ -4,17 +4,14 @@ use std::path::PathBuf;
 use clap::Args;
 use serde_json::json;
 
-use crate::commands::Cli;
 use crate::constants::GDX_RUNTIME_CAPTURE_RUNNER_RES;
+use crate::context::{validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{self, GodotCommand};
-use crate::project::{assert_project, ensure_parent_dir, godot_path_string, read_main_scene};
+use crate::project::{ensure_parent_dir, godot_path_string, read_main_scene};
 
 #[derive(Debug, Args)]
 pub struct CaptureArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub scene: Option<String>,
 
@@ -31,32 +28,19 @@ pub struct CaptureArgs {
     pub height: u32,
 }
 
-pub fn run_capture(cli: &Cli, args: &CaptureArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
+pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
     let scene = resolve_scene(&project.root, args.scene.as_deref())?;
-    if !scene.starts_with("res://") {
-        return Err(GdxError::user(
-            "invalid_scene",
-            "--scene must be a res:// path",
-        ));
-    }
+    validate_res_path("--scene", &scene)?;
     if args.width == 0 || args.height == 0 {
         return Err(GdxError::user(
             "invalid_resolution",
             "Width and height must be greater than zero",
         ));
     }
-    let capture = if args.out.is_absolute() {
-        args.out.clone()
-    } else {
-        std::env::current_dir()
-            .map_err(|err| {
-                GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
-            })?
-            .join(&args.out)
-    };
+    let capture = ctx.abs_path(&args.out);
     ensure_parent_dir(&capture)?;
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
+    let binary = ctx.locate_godot()?;
     let result = godot::run(GodotCommand {
         binary,
         project: project.root.clone(),
@@ -96,7 +80,7 @@ pub fn run_capture(cli: &Cli, args: &CaptureArgs) -> GdxResult<serde_json::Value
 
     Ok(json!({
         "ok": true,
-        "command": "run.capture",
+        "command": "capture.run",
         "project": godot_path_string(&project.root),
         "scene": scene,
         "capture": godot_path_string(&capture),

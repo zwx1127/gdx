@@ -1,52 +1,51 @@
 # AI Usage
 
-gdx is intended to be driven by agents through subprocess calls. Use `--json` for every command. Failures are emitted to stderr as JSON and include log artifacts when a Godot process was started.
+gdx is intended to be driven by agents through subprocess calls. Every command emits JSON. Failures are emitted to stderr as JSON and include log artifacts when a Godot process was started.
 
 Codex is the game developer: it analyzes requirements, writes Godot scripts, creates scene/resource specs, chooses architecture, and interprets failures. gdx is the Godot wrapper: it applies project settings, installs runtime files, copies/imports assets, creates/checks scripts, builds scenes/resources, controls runtime sessions, captures screenshots, and runs Godot tests. Do not add source-project-specific migration logic to gdx.
 
+Use `--project <dir>` as a global option for every command that operates on an existing Godot project.
+
 ## Attach to a Project
 
-For an existing Godot project:
-
 ```powershell
-gdx project install --project <project> --json
-gdx project inspect --project <project> --json
+gdx --project <project> project install
+gdx --project <project> project inspect
 ```
 
 `project install` installs gdx runtime files under `addons/gdx_*`. `project inspect` returns the project name, configured main scene, gdx installation status, and categorized project files.
 
-## Create a Scene
-
-If the project has no main scene:
+## Create a Project and Scene
 
 ```powershell
-gdx scene create --project <project> --out res://scenes/main.tscn --root-type Node2D --name Main --set-main --json
+gdx project create --path <project> --name Demo
+gdx --project <project> scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
 ```
 
-Use Godot class names for `--root-type` and `scene node add --type`. gdx validates them inside Godot.
+Use Godot class names for `--root-type` and `node create --type`. gdx validates them inside Godot.
 
-## Project Settings, Autoloads, and Input
+## Project Settings, Autoloads, and Input Maps
 
 ```powershell
-gdx project setting set --project <project> --section application --key run/main_scene --value res://scenes/main.tscn --json
-gdx project setting list --project <project> --section application --json
-gdx project autoload add --project <project> --name GameState --path res://scripts/game_state.gd --global --json
-gdx project autoload list --project <project> --json
-gdx project input add --project <project> --action ui_accept --keycode 32 --json
+gdx --project <project> setting set --section application --key run/main_scene --value res://scenes/main.tscn
+gdx --project <project> setting list --section application
+gdx --project <project> autoload add --name GameState --path res://scripts/game_state.gd --global
+gdx --project <project> autoload list
+gdx --project <project> input-map add --action ui_accept --keycode 32
 ```
 
 ## Assets, Scripts, Scenes, and Resources
 
 ```powershell
-gdx asset copy --project <project> --from C:\Assets\icon.png --to res://assets/icon.png --json
-gdx asset import --project <project> --json
-gdx asset inspect --project <project> --path res://assets/icon.png --json
-gdx script create --project <project> --path res://scripts/main.gd --extends Node2D --json
-gdx script attach --project <project> --scene res://scenes/main.tscn --node / --script res://scripts/main.gd --json
-gdx script check-all --project <project> --json
-gdx scene build --project <project> --spec .\scene_spec.json --json
-gdx resource create --project <project> --type StandardMaterial3D --out res://materials/basic.tres --json
-gdx resource inspect --project <project> --path res://materials/basic.tres --json
+gdx --project <project> asset copy --from C:\Assets\icon.png --to res://assets/icon.png
+gdx --project <project> asset import
+gdx --project <project> asset inspect --path res://assets/icon.png
+gdx --project <project> script create --path res://scripts/main.gd --extends Node2D
+gdx --project <project> script attach --scene res://scenes/main.tscn --node / --script res://scripts/main.gd
+gdx --project <project> script check-all
+gdx --project <project> scene build --spec .\scene_spec.json
+gdx --project <project> resource create --type StandardMaterial3D --out res://materials/basic.tres
+gdx --project <project> resource inspect --path res://materials/basic.tres
 ```
 
 `scene build` consumes a Godot-only JSON spec. The spec should describe nodes, properties, scripts, resources, groups, and children. Codex is responsible for generating the spec from its own design decisions.
@@ -54,25 +53,33 @@ gdx resource inspect --project <project> --path res://materials/basic.tres --jso
 ## Edit and Verify
 
 ```powershell
-gdx daemon start --project <project> --json
-gdx scene tree --project <project> --json
-gdx scene node add --project <project> --parent / --type Label --name Status --json
-gdx scene node set-property --project <project> --node /Status --property text --value "Ready" --json
-gdx scene node set-property --project <project> --node /Status --property position --vec2 40 40 --json
-gdx scene save --project <project> --json
-gdx daemon capture --project <project> --out <project>\.gdx\capture.png --json
-gdx daemon input --project <project> --mouse-button 1 --position 120 240 --json
-gdx daemon call --project <project> --target / --method start_game --args-json "[]" --json
-gdx daemon state --project <project> --target / --method gdx_state --json
-gdx daemon stop --project <project> --json
+gdx --project <project> daemon start
+gdx --project <project> scene tree
+gdx --project <project> node create --parent / --type Label --name Status
+gdx --project <project> node set --node /Status --property text --value "Ready"
+gdx --project <project> node set --node /Status --property position --vec2 40 40
+gdx --project <project> scene save
+gdx --project <project> capture daemon --out <project>\.gdx\capture.png
+gdx --project <project> input send --mouse-button 1 --position 120 240
+gdx --project <project> call invoke --target / --method start_game --args-json "[]"
+gdx --project <project> state get --target / --method gdx_state
+gdx --project <project> daemon stop
 ```
 
 `daemon start` uses the project's main scene unless `--scene res://...` is provided. The daemon listens only on `127.0.0.1` and uses a per-session token stored in `.gdx/daemon/session.json`.
 
+## Capture Without a Daemon
+
+```powershell
+gdx --project <project> capture run --scene res://scenes/main.tscn --out <project>\.gdx\capture.png
+```
+
+When `--scene` is omitted, `capture run` uses the configured main scene.
+
 ## Godot Tests
 
 ```powershell
-gdx test run --project <project> --path res://tests/smoke_test.gd --method run_tests --json
+gdx --project <project> test run --path res://tests/smoke_test.gd --method run_tests
 ```
 
 The test script should expose the requested method and return JSON-compatible data.

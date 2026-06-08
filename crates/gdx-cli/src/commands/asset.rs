@@ -5,16 +5,13 @@ use clap::Args;
 use serde_json::json;
 use walkdir::WalkDir;
 
-use crate::commands::Cli;
+use crate::context::{validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{self, GodotCommand};
-use crate::project::{assert_project, ensure_parent_dir, godot_path_string, res_to_abs};
+use crate::project::{ensure_parent_dir, godot_path_string, res_to_abs};
 
 #[derive(Debug, Args)]
 pub struct CopyArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-
     #[arg(long)]
     pub from: PathBuf,
 
@@ -26,34 +23,18 @@ pub struct CopyArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct ImportArgs {
-    #[arg(long)]
-    pub project: PathBuf,
-}
+pub struct ImportArgs {}
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
     #[arg(long)]
-    pub project: PathBuf,
-
-    #[arg(long)]
     pub path: String,
 }
 
-pub fn run_copy(args: &CopyArgs) -> GdxResult<serde_json::Value> {
-    if !args.to.starts_with("res://") {
-        return Err(GdxError::user("invalid_to", "--to must be a res:// path"));
-    }
-    let project = assert_project(&args.project)?;
-    let from = if args.from.is_absolute() {
-        args.from.clone()
-    } else {
-        std::env::current_dir()
-            .map_err(|err| {
-                GdxError::tool("io_failed", format!("Cannot read current directory: {err}"))
-            })?
-            .join(&args.from)
-    };
+pub fn run_copy(ctx: &AppContext, args: &CopyArgs) -> GdxResult<serde_json::Value> {
+    validate_res_path("--to", &args.to)?;
+    let project = ctx.project()?;
+    let from = ctx.abs_path(&args.from);
     if !from.is_file() {
         return Err(GdxError::not_found(
             "source_not_found",
@@ -89,9 +70,9 @@ pub fn run_copy(args: &CopyArgs) -> GdxResult<serde_json::Value> {
     }))
 }
 
-pub fn run_import(cli: &Cli, args: &ImportArgs) -> GdxResult<serde_json::Value> {
-    let project = assert_project(&args.project)?;
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
+pub fn run_import(ctx: &AppContext, _args: &ImportArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
+    let binary = ctx.locate_godot()?;
     let result = godot::run(GodotCommand {
         binary,
         project: project.root.clone(),
@@ -136,30 +117,20 @@ pub fn run_import(cli: &Cli, args: &ImportArgs) -> GdxResult<serde_json::Value> 
     }))
 }
 
-pub fn run_inspect(cli: &Cli, args: &InspectArgs) -> GdxResult<serde_json::Value> {
-    if !args.path.starts_with("res://") {
-        return Err(GdxError::user(
-            "invalid_path",
-            "--path must be a res:// path",
-        ));
-    }
-    let project = assert_project(&args.project)?;
-    let binary = godot::locate_godot(cli.godot.as_deref())?;
-    let result = godot::run_automation(
-        binary,
+pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json::Value> {
+    validate_res_path("--path", &args.path)?;
+    let project = ctx.project()?;
+    let result = ctx.run_automation(
         project.root.clone(),
         "asset_inspect",
         json!({ "path": args.path }),
         30,
     )?;
-    if result.status_code != 0 {
-        return Err(godot::godot_failed(&result));
-    }
     Ok(json!({
         "ok": true,
         "command": "asset.inspect",
         "project": godot_path_string(&project.root),
-        "asset": result.last_json
+        "asset": result
     }))
 }
 
