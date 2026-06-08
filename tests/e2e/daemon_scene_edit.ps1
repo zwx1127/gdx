@@ -12,7 +12,7 @@ if (Test-Path (Join-Path $Dotnet "dotnet.exe")) {
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Bin = Join-Path $Root "target\debug\gdx.exe"
-$Work = Join-Path $env:TEMP "gdx_daemon_hello"
+$Work = Join-Path $env:TEMP ("gdx_existing_" + [guid]::NewGuid().ToString("N"))
 $Shot = Join-Path $Work "daemon-shot.png"
 
 function Invoke-Native {
@@ -42,18 +42,22 @@ Invoke-Native cargo build -p gdx-cli
 
 $Common = @("--godot", $Godot)
 
-Invoke-Native $Bin init basic --path $Work --name hello --json
-Invoke-Native $Bin @Common scene build `
+[void](New-Item -ItemType Directory -Force -Path $Work)
+Set-Content -LiteralPath (Join-Path $Work "project.godot") -Encoding UTF8 -Value "config_version=5`n`n[application]`nconfig/name=`"existing`"`n"
+Invoke-Native $Bin project setup --project $Work --json
+Invoke-Native $Bin project inspect --project $Work --json
+Invoke-Native $Bin @Common scene new `
     --project $Work `
-    --spec (Join-Path $Root "examples\hello_scene.json") `
     --out "res://scenes/main.tscn" `
+    --root-type Node2D `
+    --name Main `
+    --set-main `
     --json
 Invoke-Native $Bin @Common asset import --project $Work --json
 
 try {
     Invoke-Native $Bin @Common serve `
         --project $Work `
-        --scene "res://scenes/main.tscn" `
         --width 1280 `
         --height 720 `
         --restart `
@@ -62,10 +66,8 @@ try {
     Invoke-Native $Bin status --project $Work --json
     Invoke-Native $Bin scene tree --project $Work --json
     Invoke-Native $Bin scene add-node --project $Work --parent "/" --type Label --name Subtitle --json
-    $TextJson = '"Edited by daemon"'
-    $PositionJson = '{"vec2":[40,90]}'
-    Invoke-Native $Bin scene set --project $Work --node "/Subtitle" --property text --value-json $TextJson --json
-    Invoke-Native $Bin scene set --project $Work --node "/Subtitle" --property position --value-json $PositionJson --json
+    Invoke-Native $Bin scene set --project $Work --node "/Subtitle" --property text --value "Edited by daemon" --json
+    Invoke-Native $Bin scene set --project $Work --node "/Subtitle" --property position --vec2 40 90 --json
     Invoke-Native $Bin scene save --project $Work --json
 
     $SceneText = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Work "scenes\main.tscn")

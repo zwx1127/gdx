@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::commands::Cli;
 use crate::daemon::{self, SpawnDaemon};
 use crate::error::{GdxError, GdxResult};
-use crate::project::{assert_project, ensure_parent_dir, godot_path_string};
+use crate::project::{assert_project, ensure_parent_dir, godot_path_string, read_main_scene};
 
 #[derive(Debug, Args)]
 pub struct ServeArgs {
@@ -15,7 +15,7 @@ pub struct ServeArgs {
     pub project: PathBuf,
 
     #[arg(long)]
-    pub scene: String,
+    pub scene: Option<String>,
 
     #[arg(long)]
     pub port: Option<u16>,
@@ -58,7 +58,9 @@ pub struct CaptureArgs {
 }
 
 pub fn run_serve(cli: &Cli, args: &ServeArgs) -> GdxResult<serde_json::Value> {
-    if !args.scene.starts_with("res://") {
+    let project = assert_project(&args.project)?;
+    let scene = resolve_scene(&project.root, args.scene.as_deref())?;
+    if !scene.starts_with("res://") {
         return Err(GdxError::user(
             "invalid_scene",
             "--scene must be a res:// path",
@@ -70,8 +72,6 @@ pub fn run_serve(cli: &Cli, args: &ServeArgs) -> GdxResult<serde_json::Value> {
             "Width and height must be greater than zero",
         ));
     }
-
-    let project = assert_project(&args.project)?;
     if let Ok(existing) = daemon::read_session(&project.root) {
         if daemon::ping_session(&existing) {
             if !args.restart {
@@ -100,7 +100,7 @@ pub fn run_serve(cli: &Cli, args: &ServeArgs) -> GdxResult<serde_json::Value> {
     let session = daemon::spawn_daemon(SpawnDaemon {
         binary,
         project: project.root.clone(),
-        scene: args.scene.clone(),
+        scene,
         port,
         token,
         width: args.width,
@@ -115,6 +115,19 @@ pub fn run_serve(cli: &Cli, args: &ServeArgs) -> GdxResult<serde_json::Value> {
         "already_running": false,
         "session": session
     }))
+}
+
+fn resolve_scene(project: &std::path::Path, explicit: Option<&str>) -> GdxResult<String> {
+    if let Some(scene) = explicit {
+        return Ok(scene.to_string());
+    }
+    read_main_scene(project)?.ok_or_else(|| {
+        GdxError::user(
+            "main_scene_missing",
+            "No scene was provided and project has no main scene",
+        )
+        .with_suggestion("Pass --scene res://... or create one with gdx scene new --set-main.")
+    })
 }
 
 pub fn run_status(args: &StatusArgs) -> GdxResult<serde_json::Value> {

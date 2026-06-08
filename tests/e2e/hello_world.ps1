@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Bin = Join-Path $Root "target\debug\gdx.exe"
-$Work = Join-Path $env:TEMP "gdx_hello"
+$Work = Join-Path $env:TEMP ("gdx_e2e_" + [guid]::NewGuid().ToString("N"))
 $Shot = Join-Path $Work "shot.png"
 
 function Invoke-Native {
@@ -38,31 +38,36 @@ Invoke-Native cargo build -p gdx-cli
 $Common = @("--godot", $Godot)
 
 Invoke-Native $Bin @Common env --json
-Invoke-Native $Bin init basic --path $Work --name hello --json
+Invoke-Native $Bin init --path $Work --name hello --json
 
 if (!(Test-Path (Join-Path $Work "project.godot"))) { throw "project.godot was not created" }
-if (!(Test-Path (Join-Path $Work "addons\gdx_tools\build_scene.gd"))) { throw "build_scene.gd was not created" }
+if (!(Test-Path (Join-Path $Work "addons\gdx_tools\create_scene.gd"))) { throw "create_scene.gd was not created" }
 if (!(Test-Path (Join-Path $Work "addons\gdx_runtime\capture_runner.gd"))) { throw "capture_runner.gd was not created" }
+if (Test-Path (Join-Path $Work "scripts\main.gd")) { throw "scripts\main.gd should not be created by init" }
 
-Invoke-Native $Bin @Common scene build `
+Invoke-Native $Bin @Common scene new `
     --project $Work `
-    --spec (Join-Path $Root "examples\hello_scene.json") `
     --out "res://scenes/main.tscn" `
+    --root-type Node2D `
+    --name Main `
+    --set-main `
     --json
 
 if (!(Test-Path (Join-Path $Work "scenes\main.tscn"))) { throw "main.tscn was not created" }
 
 Invoke-Native $Bin @Common asset import --project $Work --json
-Invoke-Native $Bin @Common code check --project $Work "res://scripts/main.gd" --json
 
-Invoke-Native $Bin @Common play run `
-    --project $Work `
-    --scene "res://scenes/main.tscn" `
-    --capture $Shot `
-    --frames 10 `
-    --width 1280 `
-    --height 720 `
-    --json
+try {
+    Invoke-Native $Bin @Common serve --project $Work --restart --json
+    Invoke-Native $Bin scene add-node --project $Work --parent "/" --type Label --name Title --json
+    Invoke-Native $Bin scene set --project $Work --node "/Title" --property text --value "Hello gdx" --json
+    Invoke-Native $Bin scene set --project $Work --node "/Title" --property position --vec2 40 40 --json
+    Invoke-Native $Bin scene save --project $Work --json
+    Invoke-Native $Bin capture --project $Work --out $Shot --frames 10 --json
+}
+finally {
+    & $Bin kill --project $Work --force --json
+}
 
 $ShotInfo = Get-Item -LiteralPath $Shot
 if ($ShotInfo.Length -le 0) { throw "Capture is empty: $Shot" }

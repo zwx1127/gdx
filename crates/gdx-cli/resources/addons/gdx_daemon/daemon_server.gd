@@ -1,28 +1,5 @@
 extends Node
 
-const ALLOWED_TYPES := {
-    "Node": true,
-    "Node2D": true,
-    "Sprite2D": true,
-    "Label": true,
-    "Camera2D": true,
-    "Area2D": true,
-    "CollisionShape2D": true,
-    "CharacterBody2D": true,
-    "RigidBody2D": true,
-    "StaticBody2D": true,
-    "Node3D": true,
-    "Camera3D": true,
-    "MeshInstance3D": true,
-    "DirectionalLight3D": true,
-    "OmniLight3D": true,
-    "SpotLight3D": true,
-    "StaticBody3D": true,
-    "CharacterBody3D": true,
-    "RigidBody3D": true,
-    "CollisionShape3D": true,
-}
-
 var server := TCPServer.new()
 var clients: Array[Dictionary] = []
 var token := ""
@@ -138,13 +115,14 @@ func _rpc_add_node(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
     if parent == null:
         _send_error(peer, id, "parent_not_found", "Parent not found: %s" % parent_path)
         return
-    if not ALLOWED_TYPES.has(type_name):
-        _send_error(peer, id, "unsupported_node_type", "Unsupported node type: %s" % type_name)
+    if not ClassDB.class_exists(type_name):
+        _send_error(peer, id, "unknown_node_type", "Unknown node type: %s" % type_name)
         return
-    var node = ClassDB.instantiate(type_name) as Node
-    if node == null:
-        _send_error(peer, id, "instantiate_failed", "Cannot instantiate node type: %s" % type_name)
+    var inst = ClassDB.instantiate(type_name)
+    if inst == null or not (inst is Node):
+        _send_error(peer, id, "invalid_node_type", "Type must instantiate a Node: %s" % type_name)
         return
+    var node := inst as Node
     node.name = node_name
     parent.add_child(node)
     node.owner = scene_root

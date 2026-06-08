@@ -4,6 +4,7 @@ mod env;
 mod export;
 mod init;
 mod play;
+mod project_cmd;
 mod scene;
 mod session;
 
@@ -30,7 +31,8 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Env,
-    Init(InitCommand),
+    Init(init::InitArgs),
+    Project(ProjectCommand),
     Scene(SceneCommand),
     Asset(AssetCommand),
     Code(CodeCommand),
@@ -43,25 +45,26 @@ pub enum Commands {
 }
 
 #[derive(Debug, Args)]
-pub struct InitCommand {
-    #[command(subcommand)]
-    pub command: InitSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum InitSubcommand {
-    Basic(init::BasicArgs),
-}
-
-#[derive(Debug, Args)]
 pub struct SceneCommand {
     #[command(subcommand)]
     pub command: SceneSubcommand,
 }
 
+#[derive(Debug, Args)]
+pub struct ProjectCommand {
+    #[command(subcommand)]
+    pub command: ProjectSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectSubcommand {
+    Setup(project_cmd::SetupArgs),
+    Inspect(project_cmd::InspectArgs),
+}
+
 #[derive(Debug, Subcommand)]
 pub enum SceneSubcommand {
-    Build(scene::BuildArgs),
+    New(scene::NewArgs),
     Tree(scene::TreeArgs),
     AddNode(scene::AddNodeArgs),
     Set(scene::SetArgs),
@@ -115,11 +118,13 @@ pub enum ExportSubcommand {
 pub fn run(cli: &Cli) -> GdxResult<Value> {
     match &cli.command {
         Commands::Env => env::run(cli),
-        Commands::Init(command) => match &command.command {
-            InitSubcommand::Basic(args) => init::run_basic(args),
+        Commands::Init(args) => init::run(args),
+        Commands::Project(command) => match &command.command {
+            ProjectSubcommand::Setup(args) => project_cmd::run_setup(args),
+            ProjectSubcommand::Inspect(args) => project_cmd::run_inspect(args),
         },
         Commands::Scene(command) => match &command.command {
-            SceneSubcommand::Build(args) => scene::run_build(cli, args),
+            SceneSubcommand::New(args) => scene::run_new(cli, args),
             SceneSubcommand::Tree(args) => scene::run_tree(args),
             SceneSubcommand::AddNode(args) => scene::run_add_node(args),
             SceneSubcommand::Set(args) => scene::run_set(args),
@@ -141,5 +146,96 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         Commands::Export(command) => match &command.command {
             ExportSubcommand::Build(args) => export::run_build(cli, args),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parses_top_level_init() {
+        let cli =
+            Cli::try_parse_from(["gdx", "init", "--path", "demo", "--name", "Demo", "--json"])
+                .unwrap();
+
+        assert!(matches!(cli.command, Commands::Init(_)));
+    }
+
+    #[test]
+    fn rejects_removed_init_basic_subcommand() {
+        let err = Cli::try_parse_from(["gdx", "init", "basic", "--path", "demo", "--name", "Demo"])
+            .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn parses_project_setup() {
+        let cli = Cli::try_parse_from(["gdx", "project", "setup", "--project", "demo", "--json"])
+            .unwrap();
+
+        assert!(matches!(cli.command, Commands::Project(_)));
+    }
+
+    #[test]
+    fn parses_scene_new() {
+        let cli = Cli::try_parse_from([
+            "gdx",
+            "scene",
+            "new",
+            "--project",
+            "demo",
+            "--out",
+            "res://scenes/main.tscn",
+            "--root-type",
+            "Node2D",
+            "--name",
+            "Main",
+            "--set-main",
+            "--json",
+        ])
+        .unwrap();
+
+        assert!(matches!(cli.command, Commands::Scene(_)));
+    }
+
+    #[test]
+    fn rejects_removed_scene_build() {
+        let err = Cli::try_parse_from([
+            "gdx",
+            "scene",
+            "build",
+            "--project",
+            "demo",
+            "--spec",
+            "scene.json",
+            "--out",
+            "res://scenes/main.tscn",
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn rejects_removed_scene_set_value_json() {
+        let err = Cli::try_parse_from([
+            "gdx",
+            "scene",
+            "set",
+            "--project",
+            "demo",
+            "--node",
+            "/Title",
+            "--property",
+            "text",
+            "--value-json",
+            "\"Hello\"",
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 }

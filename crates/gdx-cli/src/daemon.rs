@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::constants::GDX_DAEMON_SERVER_RES;
 use crate::error::{GdxError, GdxResult};
 use crate::godot;
 use crate::project::{ensure_dir, godot_path_string};
@@ -182,7 +183,7 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
         .arg("--resolution")
         .arg(format!("{}x{}", args.width, args.height))
         .arg("--single-window")
-        .arg("res://addons/gdx_daemon/daemon_server.tscn")
+        .arg(GDX_DAEMON_SERVER_RES)
         .env("GDX_DAEMON_PORT", args.port.to_string())
         .env("GDX_DAEMON_TOKEN", &args.token)
         .env("GDX_DAEMON_SCENE", &args.scene)

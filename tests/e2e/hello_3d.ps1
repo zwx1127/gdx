@@ -12,7 +12,7 @@ if (Test-Path (Join-Path $Dotnet "dotnet.exe")) {
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Bin = Join-Path $Root "target\debug\gdx.exe"
-$Work = Join-Path $env:TEMP "gdx_hello_3d"
+$Work = Join-Path $env:TEMP ("gdx_e2e_3d_" + [guid]::NewGuid().ToString("N"))
 $Shot = Join-Path $Work "shot-3d.png"
 
 function Invoke-Native {
@@ -42,25 +42,35 @@ Invoke-Native cargo build -p gdx-cli
 
 $Common = @("--godot", $Godot)
 
-Invoke-Native $Bin init basic --path $Work --name hello3d --json
-Invoke-Native $Bin @Common scene build `
+Invoke-Native $Bin init --path $Work --name hello3d --json
+Invoke-Native $Bin @Common scene new `
     --project $Work `
-    --spec (Join-Path $Root "examples\hello_3d_scene.json") `
     --out "res://scenes/main_3d.tscn" `
+    --root-type Node3D `
+    --name Main3D `
+    --set-main `
     --json
 
 if (!(Test-Path (Join-Path $Work "scenes\main_3d.tscn"))) { throw "main_3d.tscn was not created" }
 
 Invoke-Native $Bin @Common asset import --project $Work --json
 
-Invoke-Native $Bin @Common play run `
-    --project $Work `
-    --scene "res://scenes/main_3d.tscn" `
-    --capture $Shot `
-    --frames 10 `
-    --width 1280 `
-    --height 720 `
-    --json
+try {
+    Invoke-Native $Bin @Common serve --project $Work --restart --json
+    Invoke-Native $Bin scene add-node --project $Work --parent "/" --type Camera3D --name Camera --json
+    Invoke-Native $Bin scene set --project $Work --node "/Camera" --property position --vec3 0 3 6 --json
+    Invoke-Native $Bin scene set --project $Work --node "/Camera" --property rotation_degrees --vec3 -25 0 0 --json
+    Invoke-Native $Bin scene set --project $Work --node "/Camera" --property current --bool true --json
+    Invoke-Native $Bin scene add-node --project $Work --parent "/" --type DirectionalLight3D --name Sun --json
+    Invoke-Native $Bin scene set --project $Work --node "/Sun" --property rotation_degrees --vec3 -45 -30 0 --json
+    Invoke-Native $Bin scene add-node --project $Work --parent "/" --type MeshInstance3D --name Cube --json
+    Invoke-Native $Bin scene set --project $Work --node "/Cube" --property position --vec3 0 0.5 0 --json
+    Invoke-Native $Bin scene save --project $Work --json
+    Invoke-Native $Bin capture --project $Work --out $Shot --frames 10 --json
+}
+finally {
+    & $Bin kill --project $Work --force --json
+}
 
 $ShotInfo = Get-Item -LiteralPath $Shot
 if ($ShotInfo.Length -le 0) { throw "Capture is empty: $Shot" }

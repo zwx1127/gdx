@@ -1,47 +1,39 @@
 # AI Usage
 
-gdx MVP-0 is intended to be driven by agents through subprocess calls.
+gdx is intended to be driven by agents through subprocess calls. Use `--json` for every command. Failures are emitted to stderr as JSON and include log artifacts when a Godot process was started.
 
-Recommended agent flow:
+## Attach to a Project
 
-```powershell
-gdx init basic --path $env:TEMP\gdx_hello --name hello --json
-gdx scene build --project $env:TEMP\gdx_hello --spec examples\hello_scene.json --out res://scenes/main.tscn --json
-gdx asset import --project $env:TEMP\gdx_hello --json
-gdx code check --project $env:TEMP\gdx_hello res://scripts/main.gd --json
-gdx play run --project $env:TEMP\gdx_hello --scene res://scenes/main.tscn --capture $env:TEMP\gdx_hello\shot.png --json
-```
-
-Use `--json` for every command. Failures are emitted to stderr as JSON and include log artifacts when a Godot process was started.
-
-MVP-0 deliberately does not modify Godot engine source, implement a headless GPU display server, run a daemon, expose RPC, or call LLM/VLM APIs.
-
-MVP-1 adds a local daemon for repeated scene edits:
+For an existing Godot project:
 
 ```powershell
-gdx serve --project $env:TEMP\gdx_hello --scene res://scenes/main.tscn --json
-gdx scene tree --project $env:TEMP\gdx_hello --json
-gdx scene add-node --project $env:TEMP\gdx_hello --parent / --type Label --name Subtitle --json
-gdx scene set --project $env:TEMP\gdx_hello --node /Subtitle --property text --value-json "Edited by daemon" --json
-gdx scene save --project $env:TEMP\gdx_hello --json
-gdx capture --project $env:TEMP\gdx_hello --out $env:TEMP\gdx_hello\daemon-shot.png --json
-gdx kill --project $env:TEMP\gdx_hello --json
+gdx project setup --project <project> --json
+gdx project inspect --project <project> --json
 ```
 
-The daemon listens only on `127.0.0.1` and uses a per-session token in `.gdx/daemon/session.json`.
+`project setup` installs gdx runtime files under `addons/gdx_*`. `project inspect` returns the project name, configured main scene, gdx installation status, and categorized project files.
 
-Basic 3D scenes use the same JSON value wrappers:
+## Create a Scene
 
-```json
-{
-  "type": "MeshInstance3D",
-  "name": "Cube",
-  "properties": {
-    "position": { "vec3": [0, 0.5, 0] },
-    "mesh": { "mesh": { "type": "box", "size": [1, 1, 1] } },
-    "material_override": { "material": { "color": [0.15, 0.34, 0.95, 1] } }
-  }
-}
+If the project has no main scene:
+
+```powershell
+gdx scene new --project <project> --out res://scenes/main.tscn --root-type Node2D --name Main --set-main --json
 ```
 
-MVP 3D support covers built-in `box`, `sphere`, and `plane` meshes plus basic `StandardMaterial3D` colors. It does not yet cover glTF import automation, animation, navigation, or complex material graphs.
+Use Godot class names for `--root-type` and `scene add-node --type`. gdx validates them inside Godot.
+
+## Edit and Verify
+
+```powershell
+gdx serve --project <project> --json
+gdx scene tree --project <project> --json
+gdx scene add-node --project <project> --parent / --type Label --name Status --json
+gdx scene set --project <project> --node /Status --property text --value "Ready" --json
+gdx scene set --project <project> --node /Status --property position --vec2 40 40 --json
+gdx scene save --project <project> --json
+gdx capture --project <project> --out <project>\.gdx\capture.png --json
+gdx kill --project <project> --json
+```
+
+`serve` uses the project's main scene unless `--scene res://...` is provided. The daemon listens only on `127.0.0.1` and uses a per-session token stored in `.gdx/daemon/session.json`.

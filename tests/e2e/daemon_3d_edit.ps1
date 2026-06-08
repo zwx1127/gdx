@@ -12,7 +12,7 @@ if (Test-Path (Join-Path $Dotnet "dotnet.exe")) {
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Bin = Join-Path $Root "target\debug\gdx.exe"
-$Work = Join-Path $env:TEMP "gdx_daemon_3d"
+$Work = Join-Path $env:TEMP ("gdx_daemon_3d_" + [guid]::NewGuid().ToString("N"))
 $Shot = Join-Path $Work "daemon-3d-shot.png"
 
 function Invoke-Native {
@@ -42,18 +42,19 @@ Invoke-Native cargo build -p gdx-cli
 
 $Common = @("--godot", $Godot)
 
-Invoke-Native $Bin init basic --path $Work --name daemon3d --json
-Invoke-Native $Bin @Common scene build `
+Invoke-Native $Bin init --path $Work --name daemon3d --json
+Invoke-Native $Bin @Common scene new `
     --project $Work `
-    --spec (Join-Path $Root "examples\hello_3d_scene.json") `
     --out "res://scenes/main_3d.tscn" `
+    --root-type Node3D `
+    --name Main3D `
+    --set-main `
     --json
 Invoke-Native $Bin @Common asset import --project $Work --json
 
 try {
     Invoke-Native $Bin @Common serve `
         --project $Work `
-        --scene "res://scenes/main_3d.tscn" `
         --width 1280 `
         --height 720 `
         --restart `
@@ -62,13 +63,7 @@ try {
     Invoke-Native $Bin scene tree --project $Work --json
     Invoke-Native $Bin scene add-node --project $Work --parent "/" --type MeshInstance3D --name AddedBox --json
 
-    $MeshJson = '{"mesh":{"type":"box","size":[1,1,1]}}'
-    $MaterialJson = '{"material":{"color":[1,0.85,0.15,1]}}'
-    $PositionJson = '{"vec3":[2,0.5,0]}'
-
-    Invoke-Native $Bin scene set --project $Work --node "/AddedBox" --property mesh --value-json $MeshJson --json
-    Invoke-Native $Bin scene set --project $Work --node "/AddedBox" --property material_override --value-json $MaterialJson --json
-    Invoke-Native $Bin scene set --project $Work --node "/AddedBox" --property position --value-json $PositionJson --json
+    Invoke-Native $Bin scene set --project $Work --node "/AddedBox" --property position --vec3 2 0.5 0 --json
     Invoke-Native $Bin scene save --project $Work --json
 
     $SceneText = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Work "scenes\main_3d.tscn")

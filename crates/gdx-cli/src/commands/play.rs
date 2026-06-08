@@ -5,9 +5,10 @@ use clap::Args;
 use serde_json::json;
 
 use crate::commands::Cli;
+use crate::constants::GDX_RUNTIME_CAPTURE_RUNNER_RES;
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{self, GodotCommand};
-use crate::project::{assert_project, ensure_parent_dir, godot_path_string};
+use crate::project::{assert_project, ensure_parent_dir, godot_path_string, read_main_scene};
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
@@ -15,7 +16,7 @@ pub struct RunArgs {
     pub project: PathBuf,
 
     #[arg(long)]
-    pub scene: String,
+    pub scene: Option<String>,
 
     #[arg(long)]
     pub capture: PathBuf,
@@ -31,7 +32,9 @@ pub struct RunArgs {
 }
 
 pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
-    if !args.scene.starts_with("res://") {
+    let project = assert_project(&args.project)?;
+    let scene = resolve_scene(&project.root, args.scene.as_deref())?;
+    if !scene.starts_with("res://") {
         return Err(GdxError::user(
             "invalid_scene",
             "--scene must be a res:// path",
@@ -43,8 +46,6 @@ pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
             "Width and height must be greater than zero",
         ));
     }
-
-    let project = assert_project(&args.project)?;
     let capture = if args.capture.is_absolute() {
         args.capture.clone()
     } else {
@@ -65,10 +66,10 @@ pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
             "--resolution".to_string(),
             format!("{}x{}", args.width, args.height),
             "--single-window".to_string(),
-            "res://addons/gdx_runtime/capture_runner.tscn".to_string(),
+            GDX_RUNTIME_CAPTURE_RUNNER_RES.to_string(),
         ],
         envs: vec![
-            ("GDX_TARGET_SCENE".to_string(), args.scene.clone()),
+            ("GDX_TARGET_SCENE".to_string(), scene.clone()),
             ("GDX_CAPTURE_OUT".to_string(), godot_path_string(&capture)),
             ("GDX_CAPTURE_FRAMES".to_string(), args.frames.to_string()),
         ],
@@ -97,7 +98,7 @@ pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
         "ok": true,
         "command": "play.run",
         "project": godot_path_string(&project.root),
-        "scene": args.scene,
+        "scene": scene,
         "capture": godot_path_string(&capture),
         "frames": args.frames,
         "resolution": [args.width, args.height],
@@ -107,6 +108,19 @@ pub fn run_play(cli: &Cli, args: &RunArgs) -> GdxResult<serde_json::Value> {
             "stderr_log": godot_path_string(&result.stderr_log)
         }
     }))
+}
+
+fn resolve_scene(project: &std::path::Path, explicit: Option<&str>) -> GdxResult<String> {
+    if let Some(scene) = explicit {
+        return Ok(scene.to_string());
+    }
+    read_main_scene(project)?.ok_or_else(|| {
+        GdxError::user(
+            "main_scene_missing",
+            "No scene was provided and project has no main scene",
+        )
+        .with_suggestion("Pass --scene res://... or create one with gdx scene new --set-main.")
+    })
 }
 
 fn runtime_capture_suggestion() -> &'static str {
