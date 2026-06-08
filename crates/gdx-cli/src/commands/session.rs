@@ -69,6 +69,18 @@ pub struct InputArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct ClickArgs {
+    #[arg(long, num_args = 2, allow_hyphen_values = true)]
+    pub position: Vec<f64>,
+
+    #[arg(long, default_value_t = 1)]
+    pub button: i64,
+
+    #[arg(long, default_value_t = 2)]
+    pub frames: u32,
+}
+
+#[derive(Debug, Args)]
 pub struct CallArgs {
     #[arg(long)]
     pub target: String,
@@ -252,6 +264,32 @@ pub fn run_input(ctx: &AppContext, args: &InputArgs) -> GdxResult<serde_json::Va
     Ok(json!({
         "ok": true,
         "command": "input.send",
+        "project": godot_path_string(&project.root),
+        "result": result
+    }))
+}
+
+pub fn run_click(ctx: &AppContext, args: &ClickArgs) -> GdxResult<serde_json::Value> {
+    if args.button <= 0 {
+        return Err(GdxError::user(
+            "invalid_button",
+            "--button must be greater than zero",
+        ));
+    }
+    let project = ctx.project()?;
+    let result = daemon::rpc(
+        &project.root,
+        "input_click",
+        json!({
+            "button": args.button,
+            "position": args.position,
+            "frames": args.frames
+        }),
+        10 + u64::from(args.frames),
+    )?;
+    Ok(json!({
+        "ok": true,
+        "command": "input.click",
         "project": godot_path_string(&project.root),
         "result": result
     }))

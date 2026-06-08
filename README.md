@@ -62,6 +62,7 @@ At runtime:
 ```powershell
 gdx --project .\demo daemon start
 gdx --project .\demo input send --mouse-button 1 --position 120 240
+gdx --project .\demo input click --position 120 240
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\shot.png

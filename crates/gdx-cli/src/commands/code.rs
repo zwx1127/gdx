@@ -99,6 +99,8 @@ pub fn run_attach(ctx: &AppContext, args: &AttachArgs) -> GdxResult<serde_json::
         validate_res_path("--out", out)?;
     }
     let project = ctx.project()?;
+    let out = args.out.as_deref().unwrap_or(&args.scene);
+    ensure_parent_dir(&res_to_abs(&project.root, out)?)?;
     let result = ctx.run_automation(
         project.root.clone(),
         "script_attach",

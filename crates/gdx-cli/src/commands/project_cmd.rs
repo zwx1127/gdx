@@ -12,7 +12,7 @@ use crate::context::{validate_non_empty, validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
 use crate::project::{
     godot_path_string, list_project_settings, read_main_scene, read_project_name,
-    read_project_setting, remove_project_setting, set_project_setting_quoted,
+    read_project_setting, remove_project_setting, res_to_abs, set_project_setting_quoted,
     set_project_setting_raw,
 };
 
@@ -124,8 +124,10 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
     let mut scripts = Vec::new();
     let mut assets = Vec::new();
     let mut others = Vec::new();
-    let mut visited = 0usize;
-    let mut truncated = false;
+    let mut scene_count = 0usize;
+    let mut script_count = 0usize;
+    let mut asset_count = 0usize;
+    let mut other_count = 0usize;
 
     for entry in WalkDir::new(&project.root)
         .into_iter()
@@ -140,23 +142,30 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
         let Some(res_path) = to_res_path(&project.root, entry.path()) else {
             continue;
         };
-        visited += 1;
-        if visited > args.max_files {
-            truncated = true;
-            break;
-        }
         match entry
             .path()
             .extension()
             .and_then(|extension| extension.to_str())
         {
-            Some("tscn" | "scn") => scenes.push(res_path),
-            Some("gd" | "cs") => scripts.push(res_path),
+            Some("tscn" | "scn") => {
+                scene_count += 1;
+                push_limited(&mut scenes, res_path, args.max_files);
+            }
+            Some("gd" | "cs") => {
+                script_count += 1;
+                push_limited(&mut scripts, res_path, args.max_files);
+            }
             Some(
                 "png" | "jpg" | "jpeg" | "webp" | "svg" | "glb" | "gltf" | "ogg" | "wav" | "mp3"
                 | "tres" | "res" | "gdshader" | "material",
-            ) => assets.push(res_path),
-            _ => others.push(res_path),
+            ) => {
+                asset_count += 1;
+                push_limited(&mut assets, res_path, args.max_files);
+            }
+            _ => {
+                other_count += 1;
+                push_limited(&mut others, res_path, args.max_files);
+            }
         }
     }
 
@@ -164,13 +173,28 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
     scripts.sort();
     assets.sort();
     others.sort();
+    let main_scene = read_main_scene(&project.root)?;
+    let main_scene_exists = main_scene
+        .as_deref()
+        .map(|path| res_to_abs(&project.root, path).map(|path| path.is_file()))
+        .transpose()?;
+    let autoloads = list_project_settings(&project.root, "autoload")?;
+    let input_map = list_project_settings(&project.root, "input")?;
+    let scenes_truncated = scene_count > scenes.len();
+    let scripts_truncated = script_count > scripts.len();
+    let assets_truncated = asset_count > assets.len();
+    let other_truncated = other_count > others.len();
+    let truncated = scenes_truncated || scripts_truncated || assets_truncated || other_truncated;
 
     Ok(json!({
         "ok": true,
         "command": "project.inspect",
         "project": godot_path_string(&project.root),
         "name": read_project_name(&project.root)?,
-        "main_scene": read_main_scene(&project.root)?,
+        "main_scene": main_scene,
+        "main_scene_exists": main_scene_exists,
+        "autoloads": autoloads,
+        "input_map": input_map,
         "gdx": {
             "installed": gdx_addons_installed(&project.root),
             "files": {
@@ -186,7 +210,20 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
             "assets": assets,
             "other": others,
             "truncated": truncated,
-            "max_files": args.max_files
+            "max_files": args.max_files,
+            "truncated_by_kind": {
+                "scenes": scenes_truncated,
+                "scripts": scripts_truncated,
+                "assets": assets_truncated,
+                "other": other_truncated
+            }
+        },
+        "summary": {
+            "scenes": scene_count,
+            "scripts": script_count,
+            "assets": asset_count,
+            "other": other_count,
+            "files": scene_count + script_count + asset_count + other_count
         }
     }))
 }
@@ -356,17 +393,25 @@ fn gdx_addons_installed(project: &Path) -> bool {
 
 fn is_ignored_path(project: &Path, path: &Path) -> bool {
     if path == project {
-        return true;
+        return false;
     }
     let Ok(rel) = path.strip_prefix(project) else {
         return true;
     };
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| matches!(extension, "import" | "uid"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
     let mut components = rel.components();
     match components
         .next()
         .and_then(|component| component.as_os_str().to_str())
     {
-        Some(".godot" | ".gdx") => true,
+        Some(".godot" | ".gdx" | ".git" | ".agent-relay") => true,
         Some("addons") => matches!(
             components
                 .next()
@@ -377,10 +422,113 @@ fn is_ignored_path(project: &Path, path: &Path) -> bool {
     }
 }
 
+fn push_limited(values: &mut Vec<String>, value: String, max: usize) {
+    if values.len() < max {
+        values.push(value);
+    }
+}
+
 fn to_res_path(project: &Path, path: &Path) -> Option<String> {
     let rel = path.strip_prefix(project).ok()?;
     Some(format!(
         "res://{}",
         rel.to_string_lossy().replace('\\', "/")
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_project() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_inspect_{}_{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(path.join("scenes")).unwrap();
+        fs::create_dir_all(path.join("scripts")).unwrap();
+        fs::create_dir_all(path.join("assets")).unwrap();
+        fs::create_dir_all(path.join(".godot")).unwrap();
+        fs::create_dir_all(path.join(".gdx")).unwrap();
+        fs::create_dir_all(path.join("addons").join("gdx_tools")).unwrap();
+        fs::write(
+            path.join("project.godot"),
+            "config_version=5\n\n[application]\nconfig/name=\"Inspect Demo\"\nrun/main_scene=\"res://scenes/main.tscn\"\n\n[autoload]\nGame=\"*res://scripts/main.gd\"\n\n[input]\nui_accept={}\n",
+        )
+        .unwrap();
+        fs::write(
+            path.join("scenes").join("main.tscn"),
+            "[gd_scene format=3]\n",
+        )
+        .unwrap();
+        fs::write(path.join("scripts").join("main.gd"), "extends Node\n").unwrap();
+        fs::write(path.join("assets").join("icon.png"), [0u8, 1, 2]).unwrap();
+        fs::write(path.join("assets").join("icon.png.import"), "metadata").unwrap();
+        fs::write(path.join(".godot").join("ignored.gd"), "extends Node\n").unwrap();
+        fs::write(
+            path.join("addons").join("gdx_tools").join("automation.gd"),
+            "extends SceneTree\n",
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn inspect_walks_project_root_and_ignores_generated_files() {
+        let project = temp_project();
+        let ctx = AppContext {
+            godot: None,
+            project: Some(project.clone()),
+            cwd: project.clone(),
+        };
+
+        let value = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+
+        assert_eq!(value["main_scene"], "res://scenes/main.tscn");
+        assert_eq!(value["main_scene_exists"], true);
+        assert_eq!(value["summary"]["scenes"], 1);
+        assert_eq!(value["summary"]["scripts"], 1);
+        assert_eq!(value["summary"]["assets"], 1);
+        assert!(value["files"]["scenes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("res://scenes/main.tscn")));
+        assert!(value["files"]["scripts"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("res://scripts/main.gd")));
+        assert!(value["files"]["assets"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("res://assets/icon.png")));
+        assert!(!value["files"]["scripts"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("res://.godot/ignored.gd")));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn inspect_truncates_each_kind_independently() {
+        let project = temp_project();
+        fs::write(project.join("scripts").join("second.gd"), "extends Node\n").unwrap();
+        let ctx = AppContext {
+            godot: None,
+            project: Some(project.clone()),
+            cwd: project.clone(),
+        };
+
+        let value = run_inspect(&ctx, &InspectArgs { max_files: 1 }).unwrap();
+
+        assert_eq!(value["summary"]["scripts"], 2);
+        assert_eq!(value["files"]["scripts"].as_array().unwrap().len(), 1);
+        assert_eq!(value["files"]["assets"].as_array().unwrap().len(), 1);
+        assert_eq!(value["files"]["truncated_by_kind"]["scripts"], true);
+        assert_eq!(value["files"]["truncated_by_kind"]["assets"], false);
+
+        let _ = fs::remove_dir_all(project);
+    }
 }

@@ -168,6 +168,7 @@ pub struct InputCommand {
 #[derive(Debug, Subcommand)]
 pub enum InputSubcommand {
     Send(session::InputArgs),
+    Click(session::ClickArgs),
 }
 
 #[derive(Debug, Args)]

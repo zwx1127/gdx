@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde_json::Value;
+
 pub type GdxResult<T> = Result<T, GdxError>;
 
 #[derive(Debug, Clone)]
@@ -10,6 +12,7 @@ pub struct GdxError {
     pub exit_code: i32,
     pub suggestion: Option<String>,
     pub artifacts: BTreeMap<String, String>,
+    pub details: Option<Value>,
 }
 
 impl GdxError {
@@ -40,6 +43,7 @@ impl GdxError {
             exit_code,
             suggestion: None,
             artifacts: BTreeMap::new(),
+            details: None,
         }
     }
 
@@ -50,6 +54,11 @@ impl GdxError {
 
     pub fn with_artifact(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.artifacts.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
         self
     }
 }

@@ -60,15 +60,43 @@ func _script_attach(params: Dictionary) -> void:
     var node := _resolve_node(root, node_path)
     if node == null:
         root.free()
-        _fail("node_not_found", "Node not found: %s" % node_path)
+        _fail_details("node_not_found", "Node not found: %s" % node_path, {
+            "scene": scene_path,
+            "node": node_path,
+            "script": script_path,
+            "out": out_path,
+        })
         return
     var script = load(script_path)
     if script == null:
         root.free()
-        _fail("script_load_failed", "Cannot load script: %s" % script_path)
+        _fail_details("script_load_failed", "Cannot load script: %s" % script_path, {
+            "scene": scene_path,
+            "node": node_path,
+            "script": script_path,
+            "out": out_path,
+        })
+        return
+    if not (script is Script):
+        root.free()
+        _fail_details("invalid_script_resource", "Resource is not a Script: %s" % script_path, {
+            "scene": scene_path,
+            "node": node_path,
+            "script": script_path,
+            "out": out_path,
+            "loaded_type": script.get_class(),
+        })
         return
     node.set_script(script)
-    _save_scene_root(root, out_path)
+    if not _save_scene_root(root, out_path, {
+        "operation": "script_attach",
+        "scene": scene_path,
+        "node": node_path,
+        "script": script_path,
+        "out": out_path,
+    }):
+        return
+    _verify_scene_script(out_path, node_path, script_path)
 
 func _script_check_all(params: Dictionary) -> void:
     var root_path := str(params.get("root", "res://"))
@@ -97,7 +125,14 @@ func _scene_build(params: Dictionary) -> void:
     var root := _node_from_spec(root_spec, null)
     if root == null:
         return
-    _save_scene_root(root, out_path)
+    if not _save_scene_root(root, out_path, {
+        "operation": "scene_build",
+        "out": out_path,
+    }):
+        return
+    if not _verify_script_specs(out_path, root_spec):
+        return
+    _ok({ "out": out_path })
 
 func _resource_create(params: Dictionary) -> void:
     var out_path := str(params.get("out", ""))
@@ -212,31 +247,52 @@ func _project_input_list(_params: Dictionary) -> void:
     _ok({ "actions": actions })
 
 func _load_scene_root(scene_path: String) -> Node:
+    if not ResourceLoader.exists(scene_path):
+        _fail_details("scene_not_found", "Scene does not exist: %s" % scene_path, {
+            "scene": scene_path,
+        })
+        return null
     var packed = load(scene_path)
     if packed == null:
-        _fail("scene_load_failed", "Cannot load scene: %s" % scene_path)
+        _fail_details("scene_load_failed", "Cannot load scene: %s" % scene_path, {
+            "scene": scene_path,
+        })
+        return null
+    if not (packed is PackedScene):
+        _fail_details("invalid_scene_resource", "Resource is not a PackedScene: %s" % scene_path, {
+            "scene": scene_path,
+            "loaded_type": packed.get_class(),
+        })
         return null
     var root = packed.instantiate()
     if root == null:
-        _fail("scene_instantiate_failed", "Cannot instantiate scene: %s" % scene_path)
+        _fail_details("scene_instantiate_failed", "Cannot instantiate scene: %s" % scene_path, {
+            "scene": scene_path,
+        })
         return null
     return root
 
-func _save_scene_root(root: Node, out_path: String) -> void:
+func _save_scene_root(root: Node, out_path: String, context: Dictionary) -> bool:
     _set_owner_recursive(root, root)
     var packed := PackedScene.new()
     var pack_err := packed.pack(root)
     if pack_err != OK:
         root.free()
-        _fail("pack_failed", "PackedScene.pack failed: %s" % pack_err)
-        return
+        var pack_details := context.duplicate()
+        pack_details["godot_error"] = pack_err
+        pack_details["godot_error_name"] = error_string(pack_err)
+        _fail_details("pack_failed", "PackedScene.pack failed: %s" % error_string(pack_err), pack_details)
+        return false
     packed.take_over_path(out_path)
     var save_err := ResourceSaver.save(packed, out_path)
     root.free()
     if save_err != OK:
-        _fail("save_failed", "ResourceSaver.save failed: %s" % save_err)
-        return
-    _ok({ "out": out_path })
+        var save_details := context.duplicate()
+        save_details["godot_error"] = save_err
+        save_details["godot_error_name"] = error_string(save_err)
+        _fail_details("save_failed", "ResourceSaver.save failed: %s" % error_string(save_err), save_details)
+        return false
+    return true
 
 func _node_from_spec(spec: Dictionary, owner: Node) -> Node:
     var type_name := str(spec.get("type", "Node"))
@@ -252,10 +308,22 @@ func _node_from_spec(spec: Dictionary, owner: Node) -> Node:
     if owner != null:
         node.owner = owner
     if spec.has("script"):
-        var script = load(str(spec["script"]))
+        var script_path := str(spec["script"])
+        var script = load(script_path)
         if script == null:
             node.free()
-            _fail("script_load_failed", "Cannot load script: %s" % str(spec["script"]))
+            _fail_details("script_load_failed", "Cannot load script: %s" % script_path, {
+                "script": script_path,
+                "node": node.name,
+            })
+            return null
+        if not (script is Script):
+            node.free()
+            _fail_details("invalid_script_resource", "Resource is not a Script: %s" % script_path, {
+                "script": script_path,
+                "node": node.name,
+                "loaded_type": script.get_class(),
+            })
             return null
         node.set_script(script)
     var properties: Dictionary = spec.get("properties", {})
@@ -298,6 +366,68 @@ func _resolve_node(root: Node, path: String) -> Node:
         return root
     var clean := path.substr(1) if path.begins_with("/") else path
     return root.get_node_or_null(NodePath(clean))
+
+func _verify_scene_script(scene_path: String, node_path: String, script_path: String) -> void:
+    var root := _load_scene_root(scene_path)
+    if root == null:
+        return
+    var node := _resolve_node(root, node_path)
+    if node == null:
+        root.free()
+        _fail_details("script_verify_node_not_found", "Saved scene is missing node: %s" % node_path, {
+            "scene": scene_path,
+            "node": node_path,
+            "script": script_path,
+        })
+        return
+    var script = node.get_script()
+    var actual: String = script.resource_path if script != null else ""
+    root.free()
+    if actual != script_path:
+        _fail_details("script_verify_failed", "Saved scene script mismatch for node: %s" % node_path, {
+            "scene": scene_path,
+            "node": node_path,
+            "expected_script": script_path,
+            "actual_script": actual,
+        })
+        return
+    _ok({ "out": scene_path, "node": node_path, "script": script_path })
+
+func _verify_script_specs(scene_path: String, root_spec: Dictionary) -> bool:
+    var root := _load_scene_root(scene_path)
+    if root == null:
+        return false
+    var ok := _verify_node_script_specs(root, root_spec, "/")
+    root.free()
+    return ok
+
+func _verify_node_script_specs(node: Node, spec: Dictionary, path: String) -> bool:
+    if spec.has("script"):
+        var expected := str(spec["script"])
+        var script = node.get_script()
+        var actual: String = script.resource_path if script != null else ""
+        if actual != expected:
+            _fail_details("script_verify_failed", "Saved scene script mismatch for node: %s" % path, {
+                "scene_node": path,
+                "expected_script": expected,
+                "actual_script": actual,
+            })
+            return false
+    var children: Array = spec.get("children", [])
+    for i in range(children.size()):
+        if typeof(children[i]) != TYPE_DICTIONARY:
+            continue
+        if i >= node.get_child_count():
+            _fail_details("script_verify_child_missing", "Saved scene is missing child index: %s" % i, {
+                "scene_node": path,
+                "child_index": i,
+            })
+            return false
+        var child := node.get_child(i)
+        var child_path := "%s/%s" % [path.rstrip("/"), child.name]
+        if not _verify_node_script_specs(child, children[i], child_path):
+            return false
+    return true
 
 func _set_owner_recursive(node: Node, owner: Node) -> void:
     for child in node.get_children():
@@ -346,4 +476,9 @@ func _ok(result: Dictionary, exit_code := 0) -> void:
 func _fail(code: String, message: String) -> void:
     push_error(message)
     print(JSON.stringify({ "ok": false, "error": code, "message": message }))
+    quit(1)
+
+func _fail_details(code: String, message: String, details: Dictionary) -> void:
+    push_error(message)
+    print(JSON.stringify({ "ok": false, "error": code, "message": message, "details": details }))
     quit(1)

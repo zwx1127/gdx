@@ -7,6 +7,7 @@ var target_scene := ""
 var scene_out := ""
 var scene_root: Node = null
 var pending_capture: Dictionary = {}
+var pending_click: Dictionary = {}
 
 func _ready() -> void:
     token = OS.get_environment("GDX_DAEMON_TOKEN")
@@ -36,6 +37,7 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
     _accept_clients()
     _read_clients()
+    _tick_click()
     _tick_capture()
 
 func _accept_clients() -> void:
@@ -103,6 +105,8 @@ func _handle_line(peer: StreamPeerTCP, line: String) -> void:
             _rpc_capture(peer, id, params)
         "input_event":
             _rpc_input_event(peer, id, params)
+        "input_click":
+            _rpc_input_click(peer, id, params)
         "call_method":
             _rpc_call_method(peer, id, params)
         "get_state":
@@ -206,19 +210,42 @@ func _rpc_input_event(peer: StreamPeerTCP, id: String, params: Dictionary) -> vo
             key.pressed = bool(params.get("pressed", true))
             Input.parse_input_event(key)
         "mouse_button":
-            var mouse := InputEventMouseButton.new()
-            mouse.button_index = int(params.get("button", 1))
-            mouse.position = _to_variant({ "vec2": params.get("position", [0, 0]) })
-            mouse.pressed = bool(params.get("pressed", true))
-            Input.parse_input_event(mouse)
+            _send_mouse_button(
+                int(params.get("button", 1)),
+                _to_variant({ "vec2": params.get("position", [0, 0]) }),
+                bool(params.get("pressed", true))
+            )
         "mouse_motion":
-            var motion := InputEventMouseMotion.new()
-            motion.position = _to_variant({ "vec2": params.get("position", [0, 0]) })
-            Input.parse_input_event(motion)
+            _send_mouse_motion(_to_variant({ "vec2": params.get("position", [0, 0]) }))
         _:
             _send_error(peer, id, "unknown_input_kind", "Unknown input kind: %s" % kind)
             return
     _send_result(peer, id, { "kind": kind })
+
+func _rpc_input_click(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    if not pending_click.is_empty():
+        _send_error(peer, id, "input_busy", "A click request is already pending")
+        return
+    var button := int(params.get("button", 1))
+    if button <= 0:
+        _send_error(peer, id, "invalid_button", "button must be greater than zero")
+        return
+    var position: Vector2 = _to_variant({ "vec2": params.get("position", [0, 0]) })
+    var frames := int(params.get("frames", 2))
+    if frames < 0:
+        frames = 0
+    _send_mouse_motion(position)
+    _send_mouse_button(button, position, true)
+    pending_click = {
+        "peer": peer,
+        "id": id,
+        "button": button,
+        "position": position,
+        "frames": frames,
+        "frames_left": frames,
+        "phase": "release",
+        "before": _ui_context(),
+    }
 
 func _rpc_call_method(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
     var target_path := str(params.get("target", ""))
@@ -279,6 +306,70 @@ func _finish_capture() -> void:
     else:
         _send_result(peer, id, { "capture": out_path })
     pending_capture = {}
+
+func _tick_click() -> void:
+    if pending_click.is_empty():
+        return
+    if int(pending_click["frames_left"]) > 0:
+        pending_click["frames_left"] = int(pending_click["frames_left"]) - 1
+        return
+    var phase := str(pending_click["phase"])
+    if phase == "release":
+        _send_mouse_button(
+            int(pending_click["button"]),
+            pending_click["position"],
+            false
+        )
+        pending_click["phase"] = "finish"
+        pending_click["frames_left"] = int(pending_click["frames"])
+        return
+    var peer: StreamPeerTCP = pending_click["peer"]
+    var id: String = pending_click["id"]
+    _send_result(peer, id, {
+        "kind": "click",
+        "button": pending_click["button"],
+        "position": _json_safe(pending_click["position"]),
+        "before": pending_click["before"],
+        "after": _ui_context(),
+    })
+    pending_click = {}
+
+func _send_mouse_motion(position: Vector2) -> void:
+    if get_viewport().has_method("warp_mouse"):
+        get_viewport().call("warp_mouse", position)
+    var motion := InputEventMouseMotion.new()
+    motion.position = position
+    motion.global_position = position
+    Input.parse_input_event(motion)
+
+func _send_mouse_button(button: int, position: Vector2, pressed: bool) -> void:
+    var mouse := InputEventMouseButton.new()
+    mouse.button_index = button
+    mouse.position = position
+    mouse.global_position = position
+    mouse.pressed = pressed
+    Input.parse_input_event(mouse)
+
+func _ui_context() -> Dictionary:
+    var viewport := get_viewport()
+    var hovered: Control = null
+    var focused: Control = null
+    if viewport.has_method("gui_get_hovered_control"):
+        hovered = viewport.call("gui_get_hovered_control")
+    if viewport.has_method("gui_get_focus_owner"):
+        focused = viewport.call("gui_get_focus_owner")
+    return {
+        "mouse_position": _json_safe(viewport.get_mouse_position()),
+        "hovered": _node_debug_path(hovered),
+        "focused": _node_debug_path(focused),
+    }
+
+func _node_debug_path(node: Node) -> String:
+    if node == null:
+        return ""
+    if scene_root != null and (node == scene_root or scene_root.is_ancestor_of(node)):
+        return _path_for_node(node)
+    return str(node.get_path())
 
 func _resolve_node(path: String) -> Node:
     if scene_root == null:

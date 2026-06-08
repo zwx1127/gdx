@@ -73,6 +73,7 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         },
         Commands::Input(command) => match &command.command {
             InputSubcommand::Send(args) => session::run_input(&ctx, args),
+            InputSubcommand::Click(args) => session::run_click(&ctx, args),
         },
         Commands::Call(command) => match &command.command {
             CallSubcommand::Invoke(args) => session::run_call(&ctx, args),
@@ -283,6 +284,16 @@ mod tests {
                 "send",
                 "--mouse-button",
                 "1",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "input",
+                "click",
+                "--position",
+                "120",
+                "240",
             ],
             vec![
                 "gdx",

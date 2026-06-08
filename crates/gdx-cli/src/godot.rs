@@ -210,10 +210,33 @@ pub fn run(command: GodotCommand) -> GdxResult<GodotRunResult> {
 }
 
 pub fn godot_failed(result: &GodotRunResult) -> GdxError {
-    GdxError::tool("godot_failed", "Godot exited with non-zero status")
+    let mut error = if let Some(last_json) = &result.last_json {
+        if last_json.get("ok").and_then(Value::as_bool) == Some(false) {
+            let code = last_json
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("godot_failed");
+            let message = last_json
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Godot exited with non-zero status");
+            let mut error = GdxError::tool(code, message);
+            if let Some(details) = last_json.get("details") {
+                error = error.with_details(details.clone());
+            }
+            error
+        } else {
+            GdxError::tool("godot_failed", "Godot exited with non-zero status")
+        }
+    } else {
+        GdxError::tool("godot_failed", "Godot exited with non-zero status")
+    };
+
+    error = error
         .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
         .with_artifact("stderr_log", godot_path_string(&result.stderr_log))
-        .with_suggestion("Open the stderr log and fix the first Godot error.")
+        .with_suggestion("Open the stderr log and fix the first Godot error.");
+    error
 }
 
 pub fn run_automation(
@@ -248,4 +271,31 @@ fn last_stdout_json(stdout: &str) -> Option<Value> {
         .map(str::trim)
         .filter(|line| line.starts_with('{') && line.ends_with('}'))
         .find_map(|line| serde_json::from_str(line).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn godot_failed_uses_automation_json_error() {
+        let result = GodotRunResult {
+            status_code: 1,
+            stdout_log: PathBuf::from("stdout.log"),
+            stderr_log: PathBuf::from("stderr.log"),
+            last_json: Some(json!({
+                "ok": false,
+                "error": "save_failed",
+                "message": "ResourceSaver.save failed: ERR_CANT_CREATE",
+                "details": { "out": "res://scenes/main.tscn" }
+            })),
+        };
+
+        let error = godot_failed(&result);
+
+        assert_eq!(error.error, "save_failed");
+        assert!(error.message.contains("ERR_CANT_CREATE"));
+        assert_eq!(error.details.unwrap()["out"], "res://scenes/main.tscn");
+    }
 }

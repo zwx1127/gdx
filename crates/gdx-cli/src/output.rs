@@ -23,6 +23,9 @@ pub fn emit_err(error: GdxError) -> ! {
     if !error.artifacts.is_empty() {
         value["artifacts"] = json!(error.artifacts);
     }
+    if let Some(details) = error.details {
+        value["details"] = details;
+    }
 
     eprintln!(
         "{}",

@@ -191,6 +191,7 @@ pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Va
             "Scene build spec out must be a res:// path",
         ));
     }
+    ensure_parent_dir(&res_to_abs(&project.root, out)?)?;
     if !spec
         .get("root")
         .map(|value| value.is_object())
