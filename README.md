@@ -1,83 +1,90 @@
 # gdx
 
-gdx is a Rust CLI that helps AI agents operate real Godot 4.x projects through official Godot command line workflows.
+[中文](README.zh-CN.md) | English
 
-gdx is a Godot automation layer, not a game migration framework. Codex decides architecture, writes scripts, generates scene/resource specs, and interprets failures. gdx only wraps Godot capabilities: project settings, autoloads, input maps, assets, scripts, scenes, resources, runtime daemon control, tests, screenshots, and exports.
+`gdx` is a Rust CLI for automating real Godot 4.x projects from scripts and AI agents. It wraps official Godot command-line workflows and exposes project setup, scene editing, runtime control, screenshots, tests, and exports through JSON-emitting commands.
 
-All command output is JSON. Failures are emitted to stderr as JSON and include log artifacts and diagnostics when a Godot process was started.
+`gdx` is not a game migration framework or a game engine abstraction. The caller, often Codex or another coding agent, still owns game design, architecture, GDScript, scene specs, assets, and failure analysis. `gdx` provides a reliable automation layer around Godot.
 
-## Build
+## What you can do
+
+- Create a new Godot project and configure its main scene.
+- Install the `gdx` runtime addons into an existing Godot project.
+- Set project settings, autoloads, and input map entries.
+- Copy, import, and inspect assets.
+- Create, attach, parse-check, and load-check GDScript files.
+- Create scenes directly or build scenes from JSON specs.
+- Start a local Godot daemon for live scene edits, input, method calls, state reads, and screenshots.
+- Run Godot test scripts and multi-step verification specs.
+- Build exports through Godot export presets.
+
+All successful command output is JSON on stdout. Failures are JSON on stderr and may include Godot logs, diagnostics, and actionable suggestions.
+
+## Quick start
+
+Build the CLI:
 
 ```powershell
 cargo build --workspace
 ```
 
-## Environment
+Check that `gdx` can find Godot:
 
 ```powershell
-gdx doctor
+target\debug\gdx.exe doctor
 ```
 
-If Godot is not on `PATH`, pass `--godot` or set `GDX_GODOT`:
+If Godot is not on `PATH`, pass it explicitly or set `GDX_GODOT`:
 
 ```powershell
 $env:GDX_GODOT = "C:\Path\To\Godot_v4.x.exe"
-gdx --godot $env:GDX_GODOT doctor
+target\debug\gdx.exe --godot $env:GDX_GODOT doctor
 ```
 
-## New Project Workflow
+Create and inspect a minimal project:
 
 ```powershell
-gdx project create --path .\demo --name Demo
-gdx --project .\demo setting set --section application --key run/main_scene --value res://scenes/main.tscn
-gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
+target\debug\gdx.exe project create --path .\demo --name Demo
+target\debug\gdx.exe --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
+target\debug\gdx.exe --project .\demo project inspect
+```
+
+Use `--project <dir>` on every command that operates on an existing Godot project.
+
+## Common workflows
+
+Attach to an existing project:
+
+```powershell
+gdx --project C:\Path\To\GodotProject project install
+gdx --project C:\Path\To\GodotProject project inspect
+```
+
+Build and verify project files:
+
+```powershell
 gdx --project .\demo asset import
-gdx --project .\demo daemon start
+gdx --project .\demo script check-all
+gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
+```
+
+Use the daemon for runtime edits and screenshots:
+
+```powershell
+gdx --project .\demo daemon start --restart --width 1280 --height 720
+gdx --project .\demo scene tree
 gdx --project .\demo node create --parent / --type Label --name Title
 gdx --project .\demo node set --node /Title --property text --value "Hello from gdx"
 gdx --project .\demo node set --node /Title --property position --vec2 40 40
 gdx --project .\demo scene save
-gdx --project .\demo capture daemon --out .\demo\shot.png
+gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
-## Godot Automation Workflow
+Run a multi-step verification spec:
 
 ```powershell
-gdx --project .\demo script create --path res://scripts/game_state.gd --class-name GameState --extends Node
-gdx --project .\demo autoload add --name GameState --path res://scripts/game_state.gd --global
-gdx --project .\demo input-map add --action ui_accept --keycode 32
-gdx --project .\demo asset copy --from C:\Assets\player.png --to res://assets/player.png
-gdx --project .\demo asset import
-gdx --project .\demo asset inspect --path res://assets/player.png
-gdx --project .\demo scene build --spec .\main_scene_spec.json
-gdx --project .\demo script attach --scene res://scenes/main.tscn --node / --script res://scripts/main.gd
-gdx --project .\demo script check-all
-gdx --project .\demo script load-check
-gdx --project .\demo resource create --type StandardMaterial3D --out res://materials/basic.tres
-gdx --project .\demo test run --path res://tests/smoke_test.gd
-```
-
-`script check-all` is strict: it runs Godot's script parser for every `.gd` file and fails on parser errors and warnings that Godot treats as errors. `script load-check` keeps the older fast resource-load check.
-
-At runtime:
-
-```powershell
-gdx --project .\demo daemon start
-gdx --project .\demo input send --mouse-button 1 --position 120 240
-gdx --project .\demo input click --position 120 240
-gdx --project .\demo input click-node --target /StartButton
-gdx --project .\demo input activate --target /StartButton
-gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
-gdx --project .\demo state get --target / --method gdx_state
-gdx --project .\demo capture daemon --out .\demo\shot.png
-gdx --project .\demo daemon stop
-```
-
-For multi-step runtime verification, prefer a spec:
-
-```powershell
-gdx --project .\demo verify --spec .\verify.json
+gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 ```
 
 ```json
@@ -86,31 +93,56 @@ gdx --project .\demo verify --spec .\verify.json
   "tests": [{ "path": "res://tests/smoke_test.gd", "method": "run_tests" }],
   "daemon": { "width": 390, "height": 844, "restart": true, "stop": true },
   "steps": [
-    { "call": { "target": "/", "method": "start_game", "args": [] } },
+    { "call": { "target": "/", "method": "gdx_start_run", "args": [] } },
     { "state": { "target": "/", "method": "gdx_state" } },
-    { "capture": { "out": ".\\demo\\.gdx\\capture.png", "frames": 10 } }
+    { "capture": { "out": ".gdx/capture.png", "frames": 10 } }
   ]
 }
 ```
 
-## Existing Project Workflow
+## Documentation
 
-```powershell
-gdx --project C:\Path\To\GodotProject project install
-gdx --project C:\Path\To\GodotProject project inspect
-gdx --project C:\Path\To\GodotProject daemon start
-gdx --project C:\Path\To\GodotProject scene tree
-gdx --project C:\Path\To\GodotProject capture daemon --out C:\Path\To\GodotProject\.gdx\shot.png
-```
+- [Quickstart](docs/en/quickstart.md)
+- [Agent usage](docs/en/agent-usage.md)
+- [CLI reference](docs/en/cli-reference.md)
+- [Troubleshooting](docs/en/troubleshooting.md)
+- [Developing gdx](docs/en/developing.md)
 
-`daemon start` and `capture run` use the project's configured main scene when `--scene` is omitted. If the project has no main scene, create one with `scene create --set-main` or pass `--scene res://...`.
+The bundled Codex skill lives in [`skills/gdx-game-dev`](skills/gdx-game-dev/SKILL.md). It is intended for agents that need to build, modify, run, test, screenshot, and export Godot games through `gdx`.
 
-## Tests
+## Requirements
 
-The Windows E2E scripts require a Godot 4.x executable:
+- Rust stable, using the repository `rust-toolchain.toml`.
+- Godot 4.x executable available on `PATH`, through `GDX_GODOT`, or with `--godot`.
+- PowerShell for the bundled Windows E2E scripts.
+- Godot export templates and `export_presets.cfg` only when running `gdx export build`.
 
-```powershell
-.\tests\e2e\hello_world.ps1 -Godot "C:\Path\To\Godot_v4.x.exe"
-```
+## Project status
 
-The scripts create temporary projects, exercise the public agent workflow, and verify that screenshots are created.
+`gdx` is pre-1.0. The current focus is a reliable local automation loop for Godot 4.x projects:
+
+- CLI: Rust binary named `gdx`.
+- Runtime integration: Godot addons installed under `addons/gdx_*`.
+- Verification: script checks, Godot tests, daemon state calls, input, and screenshots.
+- Supported caller model: local scripts and AI agents.
+
+Known limitations:
+
+- The CLI does not design or migrate games by itself.
+- `scene build` consumes a Godot-specific JSON spec; callers are responsible for generating the spec.
+- The daemon binds to `127.0.0.1` and is intended for trusted local automation.
+- Export requires Godot export presets and installed export templates.
+
+## Contributing and support
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Read [SECURITY.md](SECURITY.md) before reporting sensitive issues.
+- Check [Troubleshooting](docs/en/troubleshooting.md) before opening a setup issue.
+- See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## License
+
+`gdx` is licensed under either of:
+
+- [MIT License](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)

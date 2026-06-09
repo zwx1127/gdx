@@ -1,5 +1,7 @@
 # gdx Workflows
 
+For project-facing workflow documentation, see `../../../docs/en/quickstart.md`, `../../../docs/en/agent-usage.md`, or the matching files under `../../../docs/zh-CN/`.
+
 ## New Game
 
 ```powershell

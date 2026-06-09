@@ -1,5 +1,7 @@
 # Scene Build Specs
 
+For project-facing CLI and agent documentation, see `../../../docs/en/cli-reference.md`, `../../../docs/en/agent-usage.md`, or the matching files under `../../../docs/zh-CN/`. This page is the compact agent-facing scene spec reference.
+
 Use `gdx --project <project> scene build --spec <spec.json>` to construct scenes through Godot rather than manually editing `.tscn`.
 
 ## Shape

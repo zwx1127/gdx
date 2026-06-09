@@ -1,5 +1,7 @@
 # Troubleshooting
 
+For project-facing troubleshooting documentation, see `../../../docs/en/troubleshooting.md` or `../../../docs/zh-CN/troubleshooting.md`. This page is the compact agent-facing version.
+
 ## gdx or Godot Not Found
 
 - Run `gdx doctor`.
