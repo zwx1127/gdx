@@ -1,4 +1,22 @@
+# Local planning and relay artifacts
 gdx-mvp0-codex-implementation-plan.md
+docs/archive/
+.agent-relay/
+
+# Rust build output
 target/
+
+# Godot local state and generated runs
 .godot/
 .gdx/runs/
+
+# Local environment and secrets
+.env
+.env.*
+
+# Logs and OS/editor noise
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
