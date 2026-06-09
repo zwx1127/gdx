@@ -2,6 +2,8 @@
 
 `gdx` is designed for subprocess automation. Agents should treat it as a Godot automation layer, not as a substitute for game-development judgment.
 
+`gdx` also works well with remote agent control projects such as [`agent-relay`](https://github.com/zwx1127/agent-relay). In that setup, Codex and `gdx` run on the trusted machine that has Godot installed, while the human operator uses Telegram or Lark/Feishu to send prompts, answer questions, approve actions, receive screenshots, and keep the game-development loop moving from anywhere.
+
 The agent owns:
 
 - Game design and implementation decisions.
@@ -61,6 +63,20 @@ gdx --project .\demo script check-all
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 ```
+
+## Remote workflow with agent-relay
+
+Use this pattern when the workstation has Godot installed but the developer wants to operate the loop from a phone or another machine:
+
+1. Run [`agent-relay`](https://github.com/zwx1127/agent-relay) on the same trusted machine as the Godot project.
+2. Select the Godot project workspace from chat.
+3. Ask Codex to use the `gdx-game-dev` skill and drive `gdx` commands locally.
+4. Have Codex run `script check-all`, `test run`, `verify`, or targeted daemon/capture commands after changes.
+5. Send screenshots or generated artifacts back through the relay when visual review is needed.
+
+This keeps Godot execution, daemon access, project files, and exports local. Treat chat messages, screenshots, logs, and agent output as potentially sensitive project data.
+
+agent-relay project: <https://github.com/zwx1127/agent-relay>
 
 ## Runtime state
 

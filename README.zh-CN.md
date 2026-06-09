@@ -6,6 +6,8 @@
 
 `gdx` 不是游戏迁移框架，也不是游戏引擎抽象层。调用方，通常是 Codex 或其他编码 agent，仍然负责游戏设计、架构、GDScript、场景 spec、资源和失败分析。`gdx` 只提供围绕 Godot 的可靠自动化层。
 
+当 `gdx` 配合 [`agent-relay`](https://github.com/zwx1127/agent-relay) 这类远程 agent 操作项目使用时，可以实现通过聊天工具随时随地开发 Godot 游戏。Godot、Codex 和项目文件仍然运行在可信本地机器上，你可以从 Telegram 或 Lark/飞书发送需求、批准操作、运行检查、查看截图，并持续调整开发方向。
+
 ## 能做什么
 
 - 创建新的 Godot 项目并配置 main scene。
@@ -17,6 +19,7 @@
 - 启动本地 Godot daemon，用于实时场景编辑、输入、方法调用、状态读取和截图。
 - 运行 Godot 测试脚本和多步骤 verify spec。
 - 通过 Godot export preset 构建导出产物。
+- 配合 [`agent-relay`](https://github.com/zwx1127/agent-relay)，从聊天工具远程操作本地 Codex 加 `gdx` 的开发闭环。
 
 所有成功命令都会把 JSON 写到 stdout。失败会把 JSON 写到 stderr，并可能包含 Godot 日志、诊断信息和修复建议。
 
@@ -109,6 +112,10 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 - [开发 gdx](docs/zh-CN/developing.md)
 
 内置 Codex skill 位于 [`skills/gdx-game-dev`](skills/gdx-game-dev/SKILL.md)。它面向需要通过 `gdx` 构建、修改、运行、测试、截图和导出 Godot 游戏的 agent。
+
+远程开发时，把 Codex 和 `gdx` 运行在安装了 Godot 的本地机器上，再用 [`agent-relay`](https://github.com/zwx1127/agent-relay) 作为聊天控制面。这样文件访问、Godot 执行、daemon session 和导出仍留在本机，同时可以离开工作站继续开发和审阅进展。
+
+agent-relay 项目链接：<https://github.com/zwx1127/agent-relay>
 
 ## 环境要求
 

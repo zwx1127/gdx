@@ -2,6 +2,8 @@
 
 `gdx` 面向 subprocess 自动化。Agent 应把它当作 Godot 自动化层，而不是游戏开发判断的替代品。
 
+`gdx` 也很适合配合 [`agent-relay`](https://github.com/zwx1127/agent-relay) 这类远程 agent 控制项目使用。在这种模式下，Codex 和 `gdx` 运行在安装了 Godot 的可信本地机器上；开发者通过 Telegram 或 Lark/飞书发送需求、回答问题、批准操作、接收截图，并可以在任何地方持续推进 Godot 游戏开发。
+
 Agent 负责：
 
 - 游戏设计和实现决策。
@@ -61,6 +63,20 @@ gdx --project .\demo script check-all
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 ```
+
+## 配合 agent-relay 的远程工作流
+
+当工作站安装了 Godot，但开发者希望用手机或另一台机器远程操作时，使用这个模式：
+
+1. 在 Godot 项目所在的可信机器上运行 [`agent-relay`](https://github.com/zwx1127/agent-relay)。
+2. 在聊天工具里选择 Godot 项目 workspace。
+3. 要求 Codex 使用 `gdx-game-dev` skill，并在本地驱动 `gdx` 命令。
+4. 改动后让 Codex 运行 `script check-all`、`test run`、`verify`，或有针对性的 daemon/capture 命令。
+5. 需要视觉审阅时，通过 relay 把截图或生成产物发回聊天窗口。
+
+这种模式会把 Godot 执行、daemon 访问、项目文件和导出产物留在本地。聊天消息、截图、日志和 agent 输出都应视为可能包含敏感项目数据。
+
+agent-relay 项目链接：<https://github.com/zwx1127/agent-relay>
 
 ## 运行时状态
 
