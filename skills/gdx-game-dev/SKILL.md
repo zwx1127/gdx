@@ -24,18 +24,20 @@ Use `gdx` as the Godot automation layer. Codex remains responsible for game desi
 4. Verify in a loop:
    - `gdx --project <project> asset import`
    - `gdx --project <project> script check-all`
-   - `gdx --project <project> daemon start --restart`
-   - `gdx --project <project> capture daemon --out <project>\.gdx\capture.png`
    - `gdx --project <project> test run --path res://tests/smoke_test.gd`
+   - `gdx --project <project> verify --spec <project>\.gdx\verify.json`
+   - For ad hoc runtime checks, use `daemon start --restart`, `call invoke`, `state get`, and `capture daemon`.
    - Stop long-running sessions with `gdx --project <project> daemon stop`.
 
 ## Required Practices
 
-- Treat every command response as JSON. On failure, read the JSON from stderr and inspect any `artifacts.stdout_log` or `artifacts.stderr_log` paths before guessing.
+- Treat every command response as JSON. On failure, read the JSON diagnostics first, then inspect any `artifacts.stdout_log` or `artifacts.stderr_log` paths if needed.
 - Use Godot class names exactly, such as `Node2D`, `Control`, `Label`, `Sprite2D`, `CharacterBody2D`, `Node3D`, `MeshInstance3D`, and `Camera3D`.
 - Use `res://` paths for Godot project resources and ordinary filesystem paths only for external files, specs, and screenshots.
 - Prefer `scene build --spec <json>` for larger scene construction and daemon `node create` / `node set` for incremental edits to a running scene.
 - Add an explicit game-state method such as `gdx_state()` on important nodes when runtime verification needs structured state.
+- Prefer project-level automation methods such as `gdx_start_run()` with `call invoke` for game UI regressions. Use `input click-node` or `input activate` for generic controls; avoid coordinate clicks unless the coordinate itself is under test.
+- Avoid `:=` for values derived from `Dictionary` or `Variant` unless the type is explicit; Godot can treat those inference warnings as runtime parse errors.
 - Keep daemon sessions short. Start them for interactive edits, input, state reads, and screenshots; stop them when finished.
 - Do not edit `.tscn` by hand unless the user explicitly asks and the project already follows that pattern.
 - Do not add source-project-specific migration logic to gdx itself. Fix the game project, scripts, specs, or assets.

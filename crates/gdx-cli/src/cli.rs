@@ -39,6 +39,7 @@ pub enum Commands {
     Resource(ResourceCommand),
     Test(TestCommand),
     Export(ExportCommand),
+    Verify(crate::commands::verify::VerifyArgs),
 }
 
 #[derive(Debug, Args)]
@@ -118,6 +119,7 @@ pub enum ScriptSubcommand {
     Attach(code::AttachArgs),
     Check(code::CheckArgs),
     CheckAll(code::CheckAllArgs),
+    LoadCheck(code::LoadCheckArgs),
 }
 
 #[derive(Debug, Args)]
@@ -169,6 +171,8 @@ pub struct InputCommand {
 pub enum InputSubcommand {
     Send(session::InputArgs),
     Click(session::ClickArgs),
+    ClickNode(session::ClickNodeArgs),
+    Activate(session::ActivateArgs),
 }
 
 #[derive(Debug, Args)]

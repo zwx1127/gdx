@@ -1,6 +1,6 @@
 # gdx CLI Reference
 
-All `gdx` command output is JSON. Success is written to stdout. Failures are written to stderr as JSON and may include Godot log artifacts.
+All `gdx` command output is JSON. Success is written to stdout. Failures are written to stderr as JSON and may include Godot log artifacts and diagnostics.
 
 ## Global Options
 
@@ -49,6 +49,7 @@ gdx --project .\demo script create --path res://scripts/main.gd --extends Node2D
 gdx --project .\demo script attach --scene res://scenes/main.tscn --node / --script res://scripts/main.gd
 gdx --project .\demo script check res://scripts/main.gd
 gdx --project .\demo script check-all
+gdx --project .\demo script load-check
 
 gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
 gdx --project .\demo scene build --spec .\scene_spec.json
@@ -57,6 +58,8 @@ gdx --project .\demo resource inspect --path res://materials/basic.tres
 ```
 
 `script create` writes only a minimal script header. For real gameplay, edit the `.gd` file directly after creating or use normal file edits first and then run `script check-all`.
+
+`script check-all` is strict and runs Godot parser checks over `.gd` files. `script load-check` is the older fast resource-load check.
 
 ## Daemon and Runtime Commands
 
@@ -69,6 +72,9 @@ gdx --project .\demo node set --node /Status --property text --value "Ready"
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
 gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
+gdx --project .\demo input click --position 120 240
+gdx --project .\demo input click-node --target /StartButton
+gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
@@ -76,6 +82,25 @@ gdx --project .\demo daemon stop
 ```
 
 `daemon start` uses the configured main scene unless `--scene res://...` is supplied.
+
+## Verify Specs
+
+```powershell
+gdx --project .\demo verify --spec .\demo\.gdx\verify.json
+```
+
+```json
+{
+  "checks": { "script": { "root": "res://", "strict": true } },
+  "tests": [{ "path": "res://tests/smoke_test.gd", "method": "run_tests" }],
+  "daemon": { "width": 390, "height": 844, "restart": true, "stop": true },
+  "steps": [
+    { "call": { "target": "/", "method": "start_game", "args": [] } },
+    { "state": { "target": "/", "method": "gdx_state" } },
+    { "capture": { "out": ".\\demo\\.gdx\\capture.png", "frames": 10 } }
+  ]
+}
+```
 
 ## Capture, Tests, and Export
 
@@ -93,8 +118,9 @@ When a command fails:
 
 1. Parse the stderr JSON.
 2. Read `suggestion` if present.
-3. Open `artifacts.stderr_log` and find the first Godot error.
-4. Fix project files or command arguments.
-5. Re-run the narrowest failing command before continuing.
+3. Read `details.diagnostics.primary_error` and the included log tails.
+4. Open `artifacts.stderr_log` if more context is needed.
+5. Fix project files or command arguments.
+6. Re-run the narrowest failing command before continuing.
 
 Do not infer success from process output text. Use the JSON `ok` field and expected artifacts such as created scenes or non-empty screenshots.

@@ -3,6 +3,7 @@ mod commands;
 mod constants;
 mod context;
 mod daemon;
+mod diagnostics;
 mod error;
 mod godot;
 mod output;

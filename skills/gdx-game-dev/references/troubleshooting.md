@@ -20,11 +20,17 @@ gdx --project .\demo daemon start --scene res://scenes/main.tscn
 
 ## Script Check Fails
 
-- Read the stderr JSON and Godot stderr log.
+- Read stderr JSON `details.diagnostics.primary_error` first, then the Godot stderr log if needed.
 - Fix the first parser or load error.
 - Re-run `gdx --project <project> script check-all`.
 
-Use `script check <path>` for a narrow parse check and `script check-all` before runtime verification.
+Use `script check <path>` for a narrow parse check and `script check-all` before runtime verification. `script check-all` is strict; use `script load-check` only for fast resource-load checks.
+
+If diagnostics reports `gdscript_warning_as_error`, check for `:=` values derived from `Dictionary` or `Variant`. Prefer plain assignment or explicit types:
+
+```gdscript
+var content_bottom = layout.height - layout.safe_bottom
+```
 
 ## Asset Import Warning About .NET or hostfxr
 
@@ -46,11 +52,14 @@ Daemon session data lives under `.gdx/daemon/session.json`. Prefer command clean
 
 ## Screenshot Missing or Blank
 
+- Check the command JSON diagnostics first. If the daemon exited early, fix the first Godot stderr error before changing layout code.
 - Ensure the main scene exists and has visible content.
 - Add or enable a camera for 2D/3D scenes when needed.
 - Increase daemon or capture resolution with `--width` and `--height`.
 - For one-shot captures, pass `--scene res://...` if no main scene is set.
 - Re-run `asset import` if textures or resources are missing.
+
+For UI regressions, prefer `verify --spec` plus project-level `gdx_*` methods, `input click-node`, or `input activate`. Use coordinate clicks only when the test specifically needs coordinates.
 
 ## Scene Build Fails
 

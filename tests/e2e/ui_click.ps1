@@ -110,6 +110,29 @@ try {
 
     $After = Invoke-Json $Bin --project $Work state get --target "/" --method gdx_state
     if ([int]$After.result.state.clicks -ne 1) { throw "Expected one click after input" }
+
+    Invoke-Native $Bin --project $Work input click-node --target "/ClickMe" --frames 2
+
+    $AfterNode = Invoke-Json $Bin --project $Work state get --target "/" --method gdx_state
+    if ([int]$AfterNode.result.state.clicks -ne 2) { throw "Expected two clicks after node input" }
+
+    Invoke-Native $Bin --project $Work input activate --target "/ClickMe"
+
+    $AfterActivate = Invoke-Json $Bin --project $Work state get --target "/" --method gdx_state
+    if ([int]$AfterActivate.result.state.clicks -ne 3) { throw "Expected three clicks after activate input" }
+
+    $VerifySpec = Join-Path $Work "verify.json"
+    Set-Content -LiteralPath $VerifySpec -Encoding ASCII -Value @'
+{
+  "steps": [
+    { "state": { "target": "/", "method": "gdx_state" } },
+    { "input_activate": { "target": "/ClickMe" } },
+    { "state": { "target": "/", "method": "gdx_state" } }
+  ]
+}
+'@
+    $Verify = Invoke-Json $Bin --project $Work verify --spec $VerifySpec
+    if ([int]$Verify.results[2].result.state.clicks -ne 4) { throw "Expected verify input step to activate button" }
 }
 finally {
     & $Bin --project $Work daemon stop --force

@@ -1,6 +1,7 @@
 use clap::Args;
 use serde_json::json;
 use std::fs;
+use walkdir::WalkDir;
 
 use crate::context::{validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
@@ -44,6 +45,12 @@ pub struct CheckArgs {
 
 #[derive(Debug, Args)]
 pub struct CheckAllArgs {
+    #[arg(long, default_value = "res://")]
+    pub root: String,
+}
+
+#[derive(Debug, Args)]
+pub struct LoadCheckArgs {
     #[arg(long, default_value = "res://")]
     pub root: String,
 }
@@ -122,31 +129,14 @@ pub fn run_attach(ctx: &AppContext, args: &AttachArgs) -> GdxResult<serde_json::
 
 pub fn run_check(ctx: &AppContext, args: &CheckArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
-    let binary = ctx.locate_godot()?;
-    let result = godot::run(GodotCommand {
-        binary,
-        project: project.root.clone(),
-        args: vec![
-            "--headless".to_string(),
-            "--path".to_string(),
-            godot_path_string(&project.root),
-            "--check-only".to_string(),
-            "--script".to_string(),
-            args.script_path.clone(),
-        ],
-        envs: Vec::new(),
-        timeout_secs: 60,
-    })?;
-    if result.status_code != 0 {
-        return Err(godot::godot_failed(&result));
-    }
-
+    validate_res_path("script_path", &args.script_path)?;
+    let result = run_strict_script_check(ctx, &project.root, &args.script_path, 60)?;
     Ok(json!({
         "ok": true,
         "command": "script.check",
         "project": godot_path_string(&project.root),
         "script": args.script_path,
-        "check": "parse_only",
+        "check": "strict_parse",
         "artifacts": {
             "stdout_log": godot_path_string(&result.stdout_log),
             "stderr_log": godot_path_string(&result.stderr_log)
@@ -157,6 +147,32 @@ pub fn run_check(ctx: &AppContext, args: &CheckArgs) -> GdxResult<serde_json::Va
 pub fn run_check_all(ctx: &AppContext, args: &CheckAllArgs) -> GdxResult<serde_json::Value> {
     validate_res_path("--root", &args.root)?;
     let project = ctx.project()?;
+    let scripts = collect_scripts(&project.root, &args.root)?;
+    let mut checked = Vec::new();
+    for script in &scripts {
+        let result = run_strict_script_check(ctx, &project.root, script, 60)?;
+        checked.push(json!({
+            "script": script,
+            "artifacts": {
+                "stdout_log": godot_path_string(&result.stdout_log),
+                "stderr_log": godot_path_string(&result.stderr_log)
+            }
+        }));
+    }
+    Ok(json!({
+        "ok": true,
+        "command": "script.check-all",
+        "project": godot_path_string(&project.root),
+        "check": "strict_parse",
+        "root": args.root,
+        "count": checked.len(),
+        "checked": checked
+    }))
+}
+
+pub fn run_load_check(ctx: &AppContext, args: &LoadCheckArgs) -> GdxResult<serde_json::Value> {
+    validate_res_path("--root", &args.root)?;
+    let project = ctx.project()?;
     let result = ctx.run_automation(
         project.root.clone(),
         "script_check_all",
@@ -165,8 +181,69 @@ pub fn run_check_all(ctx: &AppContext, args: &CheckAllArgs) -> GdxResult<serde_j
     )?;
     Ok(json!({
         "ok": true,
-        "command": "script.check-all",
+        "command": "script.load-check",
         "project": godot_path_string(&project.root),
+        "check": "load_only",
         "result": result
     }))
+}
+
+fn run_strict_script_check(
+    ctx: &AppContext,
+    project_root: &std::path::Path,
+    script_path: &str,
+    timeout_secs: u64,
+) -> GdxResult<godot::GodotRunResult> {
+    let binary = ctx.locate_godot()?;
+    let result = godot::run(GodotCommand {
+        binary,
+        project: project_root.to_path_buf(),
+        args: vec![
+            "--headless".to_string(),
+            "--path".to_string(),
+            godot_path_string(project_root),
+            "--check-only".to_string(),
+            "--script".to_string(),
+            script_path.to_string(),
+        ],
+        envs: Vec::new(),
+        timeout_secs,
+    })?;
+    if result.status_code != 0 {
+        let mut error = godot::godot_failed(&result);
+        let details = match error.details.take() {
+            Some(mut existing) if existing.is_object() => {
+                existing["script"] = json!(script_path);
+                existing
+            }
+            Some(existing) => json!({
+                "context": existing,
+                "script": script_path
+            }),
+            None => json!({
+                "script": script_path
+            }),
+        };
+        return Err(error.with_details(details));
+    }
+    Ok(result)
+}
+
+fn collect_scripts(project_root: &std::path::Path, root: &str) -> GdxResult<Vec<String>> {
+    let root_abs = res_to_abs(project_root, root)?;
+    let mut scripts = Vec::new();
+    if root_abs.is_file() {
+        if root_abs.extension().and_then(|ext| ext.to_str()) == Some("gd") {
+            scripts.push(crate::project::abs_to_res(project_root, &root_abs)?);
+        }
+        return Ok(scripts);
+    }
+    for entry in WalkDir::new(&root_abs).into_iter().filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("gd") {
+            scripts.push(crate::project::abs_to_res(project_root, path)?);
+        }
+    }
+    scripts.sort();
+    Ok(scripts)
 }

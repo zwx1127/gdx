@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::constants::GDX_DAEMON_SERVER_RES;
+use crate::diagnostics::attach_log_diagnostics;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
 
@@ -212,12 +213,13 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
         if let Some(status) = child.try_wait().map_err(|err| {
             GdxError::tool("wait_failed", format!("Cannot check daemon status: {err}"))
         })? {
-            return Err(GdxError::tool(
+            let error = GdxError::tool(
                 "daemon_exited",
                 format!("Godot daemon exited early with status {status}"),
             )
             .with_artifact("stdout_log", session.stdout_log.clone())
-            .with_artifact("stderr_log", session.stderr_log.clone()));
+            .with_artifact("stderr_log", session.stderr_log.clone());
+            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
         }
         if ping_session(&session) {
             return Ok(session);
@@ -227,9 +229,10 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
 
     let _ = child.kill();
     let _ = child.wait();
-    Err(GdxError::timeout("Timed out waiting for daemon to start")
+    let error = GdxError::timeout("Timed out waiting for daemon to start")
         .with_artifact("stdout_log", session.stdout_log)
-        .with_artifact("stderr_log", session.stderr_log))
+        .with_artifact("stderr_log", session.stderr_log);
+    Err(attach_log_diagnostics(error, &stdout_log, &stderr_log))
 }
 
 pub fn kill_process(pid: u32, force: bool) -> GdxResult<()> {

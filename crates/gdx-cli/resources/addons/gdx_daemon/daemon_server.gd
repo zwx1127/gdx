@@ -107,6 +107,10 @@ func _handle_line(peer: StreamPeerTCP, line: String) -> void:
             _rpc_input_event(peer, id, params)
         "input_click":
             _rpc_input_click(peer, id, params)
+        "click_node":
+            _rpc_click_node(peer, id, params)
+        "activate_node":
+            _rpc_activate_node(peer, id, params)
         "call_method":
             _rpc_call_method(peer, id, params)
         "get_state":
@@ -247,6 +251,58 @@ func _rpc_input_click(peer: StreamPeerTCP, id: String, params: Dictionary) -> vo
         "before": _ui_context(),
     }
 
+func _rpc_click_node(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    if not pending_click.is_empty():
+        _send_error(peer, id, "input_busy", "A click request is already pending")
+        return
+    var target_path := str(params.get("target", ""))
+    var target := _resolve_node(target_path)
+    if target == null:
+        _send_error(peer, id, "target_not_found", "Target not found: %s" % target_path)
+        return
+    var position = _click_position_for_node(target)
+    if position == null:
+        _send_error(peer, id, "target_not_clickable", "Target has no screen position: %s" % target_path)
+        return
+    var button := int(params.get("button", 1))
+    if button <= 0:
+        _send_error(peer, id, "invalid_button", "button must be greater than zero")
+        return
+    var frames := int(params.get("frames", 2))
+    if frames < 0:
+        frames = 0
+    _send_mouse_motion(position)
+    _send_mouse_button(button, position, true)
+    pending_click = {
+        "peer": peer,
+        "id": id,
+        "button": button,
+        "position": position,
+        "frames": frames,
+        "frames_left": frames,
+        "phase": "release",
+        "target": target_path,
+        "before": _ui_context(),
+    }
+
+func _rpc_activate_node(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    var target_path := str(params.get("target", ""))
+    var target := _resolve_node(target_path)
+    if target == null:
+        _send_error(peer, id, "target_not_found", "Target not found: %s" % target_path)
+        return
+    var before := _ui_context()
+    if target is BaseButton:
+        target.emit_signal("pressed")
+        _send_result(peer, id, {
+            "target": target_path,
+            "kind": "activate",
+            "before": before,
+            "after": _ui_context(),
+        })
+        return
+    _send_error(peer, id, "target_not_activatable", "Target is not a BaseButton: %s" % target_path)
+
 func _rpc_call_method(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
     var target_path := str(params.get("target", ""))
     var method := str(params.get("method", ""))
@@ -329,6 +385,7 @@ func _tick_click() -> void:
         "kind": "click",
         "button": pending_click["button"],
         "position": _json_safe(pending_click["position"]),
+        "target": str(pending_click.get("target", "")),
         "before": pending_click["before"],
         "after": _ui_context(),
     })
@@ -363,6 +420,17 @@ func _ui_context() -> Dictionary:
         "hovered": _node_debug_path(hovered),
         "focused": _node_debug_path(focused),
     }
+
+func _click_position_for_node(node: Node):
+    if node is Control:
+        var control := node as Control
+        return control.get_global_rect().get_center()
+    if node is Node2D:
+        return (node as Node2D).global_position
+    if node is CanvasItem:
+        var item := node as CanvasItem
+        return item.get_global_transform_with_canvas().origin
+    return null
 
 func _node_debug_path(node: Node) -> String:
     if node == null:

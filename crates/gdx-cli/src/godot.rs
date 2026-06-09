@@ -8,6 +8,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::constants::GDX_TOOLS_AUTOMATION_RES;
+use crate::diagnostics::attach_log_diagnostics;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
 
@@ -236,7 +237,7 @@ pub fn godot_failed(result: &GodotRunResult) -> GdxError {
         .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
         .with_artifact("stderr_log", godot_path_string(&result.stderr_log))
         .with_suggestion("Open the stderr log and fix the first Godot error.");
-    error
+    attach_log_diagnostics(error, &result.stdout_log, &result.stderr_log)
 }
 
 pub fn run_automation(

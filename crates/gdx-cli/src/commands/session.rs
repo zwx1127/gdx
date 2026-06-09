@@ -81,6 +81,24 @@ pub struct ClickArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct ClickNodeArgs {
+    #[arg(long)]
+    pub target: String,
+
+    #[arg(long, default_value_t = 1)]
+    pub button: i64,
+
+    #[arg(long, default_value_t = 2)]
+    pub frames: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct ActivateArgs {
+    #[arg(long)]
+    pub target: String,
+}
+
+#[derive(Debug, Args)]
 pub struct CallArgs {
     #[arg(long)]
     pub target: String,
@@ -290,6 +308,52 @@ pub fn run_click(ctx: &AppContext, args: &ClickArgs) -> GdxResult<serde_json::Va
     Ok(json!({
         "ok": true,
         "command": "input.click",
+        "project": godot_path_string(&project.root),
+        "result": result
+    }))
+}
+
+pub fn run_click_node(ctx: &AppContext, args: &ClickNodeArgs) -> GdxResult<serde_json::Value> {
+    validate_non_empty("target", &args.target)?;
+    if args.button <= 0 {
+        return Err(GdxError::user(
+            "invalid_button",
+            "--button must be greater than zero",
+        ));
+    }
+    let project = ctx.project()?;
+    let result = daemon::rpc(
+        &project.root,
+        "click_node",
+        json!({
+            "target": args.target,
+            "button": args.button,
+            "frames": args.frames
+        }),
+        10 + u64::from(args.frames),
+    )?;
+    Ok(json!({
+        "ok": true,
+        "command": "input.click-node",
+        "project": godot_path_string(&project.root),
+        "result": result
+    }))
+}
+
+pub fn run_activate(ctx: &AppContext, args: &ActivateArgs) -> GdxResult<serde_json::Value> {
+    validate_non_empty("target", &args.target)?;
+    let project = ctx.project()?;
+    let result = daemon::rpc(
+        &project.root,
+        "activate_node",
+        json!({
+            "target": args.target
+        }),
+        10,
+    )?;
+    Ok(json!({
+        "ok": true,
+        "command": "input.activate",
         "project": godot_path_string(&project.root),
         "result": result
     }))

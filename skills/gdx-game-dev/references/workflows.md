@@ -13,9 +13,7 @@ Then write scripts/assets/specs and verify:
 ```powershell
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
-gdx --project .\demo daemon start --restart
-gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
-gdx --project .\demo daemon stop
+gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 ```
 
 ## Existing Game
@@ -34,13 +32,15 @@ Use `project inspect` to find the main scene and existing project files. Avoid r
 3. Generate a scene spec JSON with top-level `out` and `root`.
 4. Run `scene build --spec <json>`.
 5. Run `script check-all`.
-6. Start daemon or capture one-shot.
+6. Run `verify --spec <json>` for runtime checks, or start daemon/capture one-shot for narrow visual checks.
 
 ```powershell
 gdx --project .\demo scene build --spec .\main_scene.json
 gdx --project .\demo script check-all
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
 ```
+
+`script check-all` is strict and runs Godot's parser over `.gd` files. Use `script load-check` only for the older fast resource-load check.
 
 ## Daemon Edit Loop
 
@@ -75,7 +75,30 @@ Then call:
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo input send --keycode 32
 gdx --project .\demo input send --mouse-button 1 --position 320 180
+gdx --project .\demo input click-node --target /StartButton
+gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
+```
+
+For multi-step UI/gameplay regression, put the flow in a verify spec:
+
+```json
+{
+  "checks": { "script": { "root": "res://", "strict": true } },
+  "tests": [{ "path": "res://tests/smoke_test.gd", "method": "run_tests" }],
+  "daemon": { "width": 390, "height": 844, "restart": true, "stop": true },
+  "steps": [
+    { "call": { "target": "/", "method": "gdx_start_run", "args": [] } },
+    { "state": { "target": "/", "method": "gdx_state" } },
+    { "capture": { "out": ".gdx/main.png", "frames": 10 } }
+  ]
+}
+```
+
+Run it with:
+
+```powershell
+gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 ```
 
 ## Godot Tests

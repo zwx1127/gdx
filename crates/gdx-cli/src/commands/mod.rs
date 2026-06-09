@@ -9,6 +9,7 @@ pub(crate) mod resource;
 pub(crate) mod scene;
 pub(crate) mod session;
 pub(crate) mod test_cmd;
+pub(crate) mod verify;
 
 use serde_json::Value;
 
@@ -55,6 +56,7 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
             ScriptSubcommand::Attach(args) => code::run_attach(&ctx, args),
             ScriptSubcommand::Check(args) => code::run_check(&ctx, args),
             ScriptSubcommand::CheckAll(args) => code::run_check_all(&ctx, args),
+            ScriptSubcommand::LoadCheck(args) => code::run_load_check(&ctx, args),
         },
         Commands::Scene(command) => match &command.command {
             SceneSubcommand::Create(args) => scene::run_create(&ctx, args),
@@ -74,6 +76,8 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         Commands::Input(command) => match &command.command {
             InputSubcommand::Send(args) => session::run_input(&ctx, args),
             InputSubcommand::Click(args) => session::run_click(&ctx, args),
+            InputSubcommand::ClickNode(args) => session::run_click_node(&ctx, args),
+            InputSubcommand::Activate(args) => session::run_activate(&ctx, args),
         },
         Commands::Call(command) => match &command.command {
             CallSubcommand::Invoke(args) => session::run_call(&ctx, args),
@@ -95,6 +99,7 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         Commands::Export(command) => match &command.command {
             ExportSubcommand::Build(args) => export::run_build(&ctx, args),
         },
+        Commands::Verify(args) => verify::run(&ctx, args),
     }
 }
 
@@ -185,6 +190,15 @@ mod tests {
                 "gdx",
                 "--project",
                 "demo",
+                "script",
+                "load-check",
+                "--root",
+                "res://",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
                 "resource",
                 "inspect",
                 "--path",
@@ -199,6 +213,14 @@ mod tests {
                 "--path",
                 "res://tests/test.gd",
             ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "verify",
+                "--spec",
+                "verify.json",
+            ],
         ] {
             let cli = parses(&args);
 
@@ -210,6 +232,7 @@ mod tests {
                     | Commands::Script(_)
                     | Commands::Resource(_)
                     | Commands::Test(_)
+                    | Commands::Verify(_)
             ));
         }
     }
@@ -294,6 +317,24 @@ mod tests {
                 "--position",
                 "120",
                 "240",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "input",
+                "click-node",
+                "--target",
+                "/ClickMe",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "input",
+                "activate",
+                "--target",
+                "/ClickMe",
             ],
             vec![
                 "gdx",

@@ -4,7 +4,7 @@ gdx is a Rust CLI that helps AI agents operate real Godot 4.x projects through o
 
 gdx is a Godot automation layer, not a game migration framework. Codex decides architecture, writes scripts, generates scene/resource specs, and interprets failures. gdx only wraps Godot capabilities: project settings, autoloads, input maps, assets, scripts, scenes, resources, runtime daemon control, tests, screenshots, and exports.
 
-All command output is JSON. Failures are emitted to stderr as JSON and include log artifacts when a Godot process was started.
+All command output is JSON. Failures are emitted to stderr as JSON and include log artifacts and diagnostics when a Godot process was started.
 
 ## Build
 
@@ -53,9 +53,12 @@ gdx --project .\demo asset inspect --path res://assets/player.png
 gdx --project .\demo scene build --spec .\main_scene_spec.json
 gdx --project .\demo script attach --scene res://scenes/main.tscn --node / --script res://scripts/main.gd
 gdx --project .\demo script check-all
+gdx --project .\demo script load-check
 gdx --project .\demo resource create --type StandardMaterial3D --out res://materials/basic.tres
 gdx --project .\demo test run --path res://tests/smoke_test.gd
 ```
+
+`script check-all` is strict: it runs Godot's script parser for every `.gd` file and fails on parser errors and warnings that Godot treats as errors. `script load-check` keeps the older fast resource-load check.
 
 At runtime:
 
@@ -63,10 +66,31 @@ At runtime:
 gdx --project .\demo daemon start
 gdx --project .\demo input send --mouse-button 1 --position 120 240
 gdx --project .\demo input click --position 120 240
+gdx --project .\demo input click-node --target /StartButton
+gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\shot.png
 gdx --project .\demo daemon stop
+```
+
+For multi-step runtime verification, prefer a spec:
+
+```powershell
+gdx --project .\demo verify --spec .\verify.json
+```
+
+```json
+{
+  "checks": { "script": { "root": "res://", "strict": true } },
+  "tests": [{ "path": "res://tests/smoke_test.gd", "method": "run_tests" }],
+  "daemon": { "width": 390, "height": 844, "restart": true, "stop": true },
+  "steps": [
+    { "call": { "target": "/", "method": "start_game", "args": [] } },
+    { "state": { "target": "/", "method": "gdx_state" } },
+    { "capture": { "out": ".\\demo\\.gdx\\capture.png", "frames": 10 } }
+  ]
+}
 ```
 
 ## Existing Project Workflow
