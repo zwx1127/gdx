@@ -50,6 +50,12 @@ gdx --project C:\Path\To\Game project inspect
 
 `project install` copies the `addons/gdx_*` runtime files needed by scene automation and daemon workflows. It does not rewrite your game architecture.
 
+After rebuilding or upgrading `gdx`, refresh an already attached project with:
+
+```powershell
+gdx --project C:\Path\To\Game project update
+```
+
 ## Verify the loop
 
 ```powershell

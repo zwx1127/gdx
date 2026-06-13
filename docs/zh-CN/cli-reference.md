@@ -20,10 +20,14 @@ gdx --godot <path-to-godot> --project <project-dir> <command>
 gdx doctor
 gdx project create --path .\demo --name Demo
 gdx --project .\demo project install
+gdx --project .\demo project update
+gdx --project .\demo project update --check
+gdx --project .\demo project update --force
 gdx --project .\demo project inspect
 ```
 
 `project install` 会把 runtime 文件安装到 `addons/gdx_*`。
+`project update` 会用当前 CLI 内置内容刷新这些 managed addon 文件。使用 `--check` 只报告状态不写入，使用 `--force` 重写全部 managed addon 文件。
 
 ## 设置、autoload 和输入
 
@@ -87,6 +91,8 @@ gdx --project .\demo daemon stop
 ```
 
 未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。`daemon start` 和 `daemon status` 会在已安装 runtime 支持时返回 daemon runtime capabilities；`status: "unknown"` 表示项目内 runtime 早于 capabilities RPC。
+
+升级或重新构建 `gdx` 后，运行 `gdx --project .\demo project update` 并重启 daemon，让运行中的项目使用新的内置 runtime。
 
 `scene tree --include-methods` 会列出匹配 `--method-prefix` 的可调用方法，默认前缀是 `gdx_`。这些字段只用于诊断；gdx 不会自动选择替代 target。
 

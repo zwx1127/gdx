@@ -22,10 +22,14 @@ Use `--project` for every command that operates on a project, including scene, s
 gdx doctor
 gdx project create --path .\demo --name Demo
 gdx --project .\demo project install
+gdx --project .\demo project update
+gdx --project .\demo project update --check
+gdx --project .\demo project update --force
 gdx --project .\demo project inspect
 ```
 
 `project install` installs the `addons/gdx_*` runtime files required by scene automation and daemon workflows.
+`project update` refreshes those managed addon files from the current CLI bundle. Use `--check` to report status without writing, and `--force` to rewrite all managed addon files.
 
 ## Settings, Autoloads, and Inputs
 
@@ -130,4 +134,4 @@ When a command fails:
 
 Do not infer success from process output text. Use the JSON `ok` field and expected artifacts such as created scenes or non-empty screenshots.
 
-If `error` is `godot_native_crash`, inspect the Godot logs and local Godot/runtime environment. gdx does not automatically switch Godot binaries. If `error` is `daemon_runtime_outdated`, run `project install` and restart the daemon.
+If `error` is `godot_native_crash`, inspect the Godot logs and local Godot/runtime environment. gdx does not automatically switch Godot binaries. If `error` is `daemon_runtime_outdated`, run `project update` and restart the daemon.

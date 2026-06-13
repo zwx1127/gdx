@@ -27,6 +27,13 @@ gdx --project C:\Path\To\Game project inspect
 
 Use `project inspect` to find the main scene and existing project files. Avoid replacing project structure unless the user requested a rewrite.
 
+After rebuilding or upgrading `gdx`, refresh an already attached project:
+
+```powershell
+gdx --project C:\Path\To\Game project update
+gdx --project C:\Path\To\Game daemon start --restart
+```
+
 ## Scene Build Loop
 
 1. Write or update scripts.

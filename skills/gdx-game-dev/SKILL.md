@@ -16,6 +16,7 @@ Use `gdx` as the Godot automation layer. Codex remains responsible for game desi
 2. Identify the project:
    - New game: `gdx project create --path <project> --name <Name>`.
    - Existing game: `gdx --project <project> project install`, then `gdx --project <project> project inspect`.
+   - After rebuilding or upgrading `gdx`, refresh an already attached project with `gdx --project <project> project update`, then restart any running daemon.
    - Use `--project <dir>` on every command that operates on an existing project.
 3. Implement in normal project files:
    - Write GDScript under `res://scripts/...`.

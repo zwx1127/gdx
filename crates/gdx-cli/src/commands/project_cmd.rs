@@ -4,10 +4,6 @@ use clap::Args;
 use serde_json::json;
 use walkdir::WalkDir;
 
-use crate::constants::{
-    GDX_DAEMON_SERVER_GD, GDX_DAEMON_SERVER_TSCN, GDX_RUNTIME_CAPTURE_RUNNER_GD,
-    GDX_RUNTIME_CAPTURE_RUNNER_TSCN, GDX_TOOLS_AUTOMATION_GD, GDX_TOOLS_CREATE_SCENE_GD,
-};
 use crate::context::{validate_non_empty, validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
 use crate::project::{
@@ -16,10 +12,20 @@ use crate::project::{
     set_project_setting_raw,
 };
 
-use super::init::{ensure_gdx_gitignore, install_gdx_addons};
+use super::addons::{self, AddonUpdateOptions};
+use super::init::ensure_gdx_gitignore;
 
 #[derive(Debug, Args)]
 pub struct InstallArgs {}
+
+#[derive(Debug, Args)]
+pub struct UpdateArgs {
+    #[arg(long)]
+    pub check: bool,
+
+    #[arg(long)]
+    pub force: bool,
+}
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
@@ -104,7 +110,7 @@ pub struct InputListArgs {}
 
 pub fn run_install(ctx: &AppContext, _args: &InstallArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
-    let mut files = install_gdx_addons(&project.root)?;
+    let mut files = addons::install_gdx_addons(&project.root)?;
     if ensure_gdx_gitignore(&project.root)? {
         files.push(".gitignore".to_string());
     }
@@ -115,6 +121,29 @@ pub fn run_install(ctx: &AppContext, _args: &InstallArgs) -> GdxResult<serde_jso
         "command": "project.install",
         "project": godot_path_string(&project.root),
         "files": files
+    }))
+}
+
+pub fn run_update(ctx: &AppContext, args: &UpdateArgs) -> GdxResult<serde_json::Value> {
+    let project = ctx.project()?;
+    let report = addons::update_gdx_addons(
+        &project.root,
+        AddonUpdateOptions {
+            check: args.check,
+            force: args.force,
+        },
+    )?;
+
+    Ok(json!({
+        "ok": true,
+        "command": "project.update",
+        "project": godot_path_string(&project.root),
+        "cli_version": report.cli_version,
+        "up_to_date": report.up_to_date,
+        "changed": report.changed,
+        "check": report.check,
+        "restart_daemon_required": report.restart_daemon_required,
+        "files": report.files
     }))
 }
 
@@ -185,6 +214,15 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
     let assets_truncated = asset_count > assets.len();
     let other_truncated = other_count > others.len();
     let truncated = scenes_truncated || scripts_truncated || assets_truncated || other_truncated;
+    let gdx_addons = addons::inspect_gdx_addons(&project.root)?;
+    let gdx_create_scene_installed =
+        gdx_file_installed(&gdx_addons.files, "addons/gdx_tools/create_scene.gd");
+    let gdx_automation_installed =
+        gdx_file_installed(&gdx_addons.files, "addons/gdx_tools/automation.gd");
+    let gdx_capture_runner_installed =
+        gdx_file_installed(&gdx_addons.files, "addons/gdx_runtime/capture_runner.tscn");
+    let gdx_daemon_installed =
+        gdx_file_installed(&gdx_addons.files, "addons/gdx_daemon/daemon_server.tscn");
 
     Ok(json!({
         "ok": true,
@@ -196,13 +234,16 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
         "autoloads": autoloads,
         "input_map": input_map,
         "gdx": {
-            "installed": gdx_addons_installed(&project.root),
+            "installed": gdx_addons.installed,
+            "up_to_date": gdx_addons.up_to_date,
+            "cli_version": gdx_addons.cli_version,
             "files": {
-                "create_scene": project.root.join(GDX_TOOLS_CREATE_SCENE_GD).is_file(),
-                "automation": project.root.join(GDX_TOOLS_AUTOMATION_GD).is_file(),
-                "capture_runner": project.root.join(GDX_RUNTIME_CAPTURE_RUNNER_TSCN).is_file(),
-                "daemon": project.root.join(GDX_DAEMON_SERVER_TSCN).is_file()
-            }
+                "create_scene": gdx_create_scene_installed,
+                "automation": gdx_automation_installed,
+                "capture_runner": gdx_capture_runner_installed,
+                "daemon": gdx_daemon_installed
+            },
+            "managed_files": gdx_addons.files
         },
         "files": {
             "scenes": scenes,
@@ -226,6 +267,12 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
             "files": scene_count + script_count + asset_count + other_count
         }
     }))
+}
+
+fn gdx_file_installed(files: &[addons::AddonFileReport], path: &str) -> bool {
+    files
+        .iter()
+        .any(|file| file.path == path && file.status_before != "missing")
 }
 
 pub fn run_setting_get(ctx: &AppContext, args: &SettingGetArgs) -> GdxResult<serde_json::Value> {
@@ -378,19 +425,6 @@ pub fn run_input_list(ctx: &AppContext, _args: &InputListArgs) -> GdxResult<serd
     }))
 }
 
-fn gdx_addons_installed(project: &Path) -> bool {
-    [
-        GDX_TOOLS_CREATE_SCENE_GD,
-        GDX_TOOLS_AUTOMATION_GD,
-        GDX_RUNTIME_CAPTURE_RUNNER_GD,
-        GDX_RUNTIME_CAPTURE_RUNNER_TSCN,
-        GDX_DAEMON_SERVER_GD,
-        GDX_DAEMON_SERVER_TSCN,
-    ]
-    .iter()
-    .all(|path| project.join(path).is_file())
-}
-
 fn is_ignored_path(project: &Path, path: &Path) -> bool {
     if path == project {
         return false;
@@ -441,6 +475,8 @@ mod tests {
     use super::*;
     use std::fs;
 
+    const AUTOMATION_GD: &str = "addons/gdx_tools/automation.gd";
+
     fn temp_project() -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
             "gdx_inspect_{}_{}",
@@ -473,6 +509,175 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    fn temp_minimal_project(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_project_{}_{}_{}",
+            name,
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        fs::write(
+            path.join("project.godot"),
+            "config_version=5\n\n[application]\nconfig/name=\"Update Demo\"\n",
+        )
+        .unwrap();
+        path
+    }
+
+    fn context_for(project: &std::path::Path) -> AppContext {
+        AppContext {
+            godot: None,
+            project: Some(project.to_path_buf()),
+            cwd: project.to_path_buf(),
+        }
+    }
+
+    fn update_args(check: bool, force: bool) -> UpdateArgs {
+        UpdateArgs { check, force }
+    }
+
+    fn file_report<'a>(value: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
+        value["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap()
+    }
+
+    fn managed_file_report<'a>(value: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
+        value["gdx"]["managed_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap()
+    }
+
+    #[test]
+    fn update_installs_missing_gdx_addons() {
+        let project = temp_minimal_project("missing");
+        let ctx = context_for(&project);
+
+        let value = run_update(&ctx, &update_args(false, false)).unwrap();
+
+        assert_eq!(value["command"], "project.update");
+        assert_eq!(value["changed"], true);
+        assert_eq!(value["up_to_date"], true);
+        assert_eq!(value["restart_daemon_required"], true);
+        let automation = file_report(&value, AUTOMATION_GD);
+        assert_eq!(automation["status_before"], "missing");
+        assert_eq!(automation["action"], "created");
+        assert!(automation["actual_hash"].is_null());
+        assert!(project.join(AUTOMATION_GD).is_file());
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn update_refreshes_outdated_gdx_addons() {
+        let project = temp_minimal_project("outdated");
+        let old_path = project.join(AUTOMATION_GD);
+        fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+        fs::write(&old_path, "extends SceneTree\n# old runtime\n").unwrap();
+        let ctx = context_for(&project);
+
+        let value = run_update(&ctx, &update_args(false, false)).unwrap();
+
+        let automation = file_report(&value, AUTOMATION_GD);
+        assert_eq!(automation["status_before"], "outdated");
+        assert_eq!(automation["action"], "updated");
+        assert_eq!(
+            fs::read_to_string(project.join(AUTOMATION_GD)).unwrap(),
+            include_str!("../../resources/addons/gdx_tools/automation.gd")
+        );
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn update_check_reports_without_writing() {
+        let project = temp_minimal_project("check");
+        let old_path = project.join(AUTOMATION_GD);
+        fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+        fs::write(&old_path, "extends SceneTree\n# old runtime\n").unwrap();
+        let ctx = context_for(&project);
+
+        let value = run_update(&ctx, &update_args(true, false)).unwrap();
+
+        assert_eq!(value["changed"], false);
+        assert_eq!(value["up_to_date"], false);
+        assert_eq!(value["restart_daemon_required"], false);
+        let automation = file_report(&value, AUTOMATION_GD);
+        assert_eq!(automation["status_before"], "outdated");
+        assert_eq!(automation["action"], "would_update");
+        assert_eq!(
+            fs::read_to_string(project.join(AUTOMATION_GD)).unwrap(),
+            "extends SceneTree\n# old runtime\n"
+        );
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn update_current_gdx_addons_is_noop() {
+        let project = temp_minimal_project("current");
+        let ctx = context_for(&project);
+        run_update(&ctx, &update_args(false, false)).unwrap();
+
+        let value = run_update(&ctx, &update_args(false, false)).unwrap();
+
+        assert_eq!(value["changed"], false);
+        assert_eq!(value["up_to_date"], true);
+        assert_eq!(value["restart_daemon_required"], false);
+        assert!(value["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|file| file["status_before"] == "current" && file["action"] == "unchanged"));
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn inspect_reports_missing_outdated_and_current_gdx_addons() {
+        let project = temp_minimal_project("inspect_gdx");
+        let ctx = context_for(&project);
+
+        let missing = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        assert_eq!(missing["gdx"]["installed"], false);
+        assert_eq!(missing["gdx"]["up_to_date"], false);
+        assert_eq!(
+            managed_file_report(&missing, AUTOMATION_GD)["status_before"],
+            "missing"
+        );
+
+        run_update(&ctx, &update_args(false, false)).unwrap();
+        let current = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        assert_eq!(current["gdx"]["installed"], true);
+        assert_eq!(current["gdx"]["up_to_date"], true);
+        assert_eq!(
+            managed_file_report(&current, AUTOMATION_GD)["status_before"],
+            "current"
+        );
+
+        fs::write(
+            project.join(AUTOMATION_GD),
+            "extends SceneTree\n# old runtime\n",
+        )
+        .unwrap();
+        let outdated = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        assert_eq!(outdated["gdx"]["installed"], true);
+        assert_eq!(outdated["gdx"]["up_to_date"], false);
+        assert_eq!(
+            managed_file_report(&outdated, AUTOMATION_GD)["status_before"],
+            "outdated"
+        );
+
+        let _ = fs::remove_dir_all(project);
     }
 
     #[test]

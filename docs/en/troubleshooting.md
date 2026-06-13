@@ -66,10 +66,10 @@ Daemon session data lives under `.gdx/daemon/session.json`. Prefer command clean
 
 ## Daemon runtime is older than the CLI
 
-If an input or verify step reports `daemon_runtime_outdated`, the running project daemon does not support an RPC method used by this CLI. Reinstall the bundled runtime and restart the daemon:
+If an input or verify step reports `daemon_runtime_outdated`, the running project daemon does not support an RPC method used by this CLI. Update the bundled runtime and restart the daemon:
 
 ```powershell
-gdx --project .\demo project install
+gdx --project .\demo project update
 gdx --project .\demo daemon start --restart
 ```
 

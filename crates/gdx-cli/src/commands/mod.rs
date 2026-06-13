@@ -1,3 +1,4 @@
+pub(crate) mod addons;
 pub(crate) mod asset;
 pub(crate) mod code;
 pub(crate) mod env;
@@ -30,6 +31,7 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
             ProjectSubcommand::Create(args) => init::run_create(&ctx, args),
             ProjectSubcommand::Install(args) => project_cmd::run_install(&ctx, args),
             ProjectSubcommand::Inspect(args) => project_cmd::run_inspect(&ctx, args),
+            ProjectSubcommand::Update(args) => project_cmd::run_update(&ctx, args),
         },
         Commands::Setting(command) => match &command.command {
             SettingSubcommand::Get(args) => project_cmd::run_setting_get(&ctx, args),
@@ -139,6 +141,19 @@ mod tests {
         ]);
 
         assert!(matches!(cli.command, Commands::Project(_)));
+    }
+
+    #[test]
+    fn parses_project_update() {
+        for args in [
+            vec!["gdx", "--project", "demo", "project", "update"],
+            vec!["gdx", "--project", "demo", "project", "update", "--check"],
+            vec!["gdx", "--project", "demo", "project", "update", "--force"],
+        ] {
+            let cli = parses(&args);
+
+            assert!(matches!(cli.command, Commands::Project(_)));
+        }
     }
 
     #[test]

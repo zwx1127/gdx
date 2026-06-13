@@ -12,6 +12,7 @@
 
 - 创建新的 Godot 项目并配置 main scene。
 - 把 `gdx` runtime addons 安装到已有 Godot 项目。
+- 把已安装项目内的 gdx addons 更新到当前 `gdx` CLI 内置 runtime。
 - 设置项目配置、autoload 和 input map。
 - 复制、导入和检查资源。
 - 创建、挂载、解析检查和加载检查 GDScript。
@@ -61,6 +62,13 @@ target\debug\gdx.exe --project .\demo project inspect
 ```powershell
 gdx --project C:\Path\To\GodotProject project install
 gdx --project C:\Path\To\GodotProject project inspect
+```
+
+升级或重新构建 `gdx` 后，更新已接入项目：
+
+```powershell
+gdx --project C:\Path\To\GodotProject project update
+gdx --project C:\Path\To\GodotProject daemon start --restart
 ```
 
 构建并验证项目文件：

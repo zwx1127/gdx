@@ -20,10 +20,14 @@ Use `--project` for commands that operate on a project.
 gdx doctor
 gdx project create --path .\demo --name Demo
 gdx --project .\demo project install
+gdx --project .\demo project update
+gdx --project .\demo project update --check
+gdx --project .\demo project update --force
 gdx --project .\demo project inspect
 ```
 
 `project install` installs runtime files under `addons/gdx_*`.
+`project update` refreshes those managed addon files from the current CLI bundle. Use `--check` to report status without writing, and `--force` to rewrite all managed addon files.
 
 ## Settings, autoloads, and inputs
 
@@ -87,6 +91,8 @@ gdx --project .\demo daemon stop
 ```
 
 `daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` include daemon runtime capabilities when the installed runtime supports them; `status: "unknown"` means the project runtime is older than the capabilities RPC.
+
+After rebuilding or upgrading `gdx`, run `gdx --project .\demo project update` and restart the daemon so the running project uses the bundled runtime.
 
 `scene tree --include-methods` lists callable methods matching `--method-prefix`, which defaults to `gdx_`. These fields are diagnostic only; gdx does not auto-select alternate targets.
 

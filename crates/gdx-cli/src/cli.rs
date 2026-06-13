@@ -53,6 +53,7 @@ pub enum ProjectSubcommand {
     Create(init::CreateArgs),
     Install(project_cmd::InstallArgs),
     Inspect(project_cmd::InspectArgs),
+    Update(project_cmd::UpdateArgs),
 }
 
 #[derive(Debug, Args)]

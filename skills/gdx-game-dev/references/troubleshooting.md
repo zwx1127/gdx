@@ -58,10 +58,10 @@ Daemon session data lives under `.gdx/daemon/session.json`. Prefer command clean
 
 ## Daemon Runtime Older Than CLI
 
-If input or verify reports `daemon_runtime_outdated`, reinstall the bundled runtime and restart the daemon:
+If input or verify reports `daemon_runtime_outdated`, update the bundled runtime and restart the daemon:
 
 ```powershell
-gdx --project <project> project install
+gdx --project <project> project update
 gdx --project <project> daemon start --restart
 ```
 

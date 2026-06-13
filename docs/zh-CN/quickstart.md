@@ -50,6 +50,12 @@ gdx --project C:\Path\To\Game project inspect
 
 `project install` 会复制 scene automation 和 daemon 工作流需要的 `addons/gdx_*` runtime 文件。它不会重写你的游戏架构。
 
+升级或重新构建 `gdx` 后，用下面的命令刷新已接入项目：
+
+```powershell
+gdx --project C:\Path\To\Game project update
+```
+
 ## 验证闭环
 
 ```powershell

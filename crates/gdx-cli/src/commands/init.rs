@@ -4,14 +4,12 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use serde_json::json;
 
-use crate::constants::{
-    GDX_DAEMON_SERVER_GD, GDX_DAEMON_SERVER_TSCN, GDX_GITIGNORE_ENTRIES,
-    GDX_RUNTIME_CAPTURE_RUNNER_GD, GDX_RUNTIME_CAPTURE_RUNNER_TSCN, GDX_TOOLS_AUTOMATION_GD,
-    GDX_TOOLS_CREATE_SCENE_GD,
-};
+use crate::constants::GDX_GITIGNORE_ENTRIES;
 use crate::context::AppContext;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
+
+use super::addons::install_gdx_addons;
 
 #[derive(Debug, Args)]
 pub struct CreateArgs {
@@ -24,38 +22,6 @@ pub struct CreateArgs {
     #[arg(long)]
     pub force: bool,
 }
-
-struct ResourceFile {
-    path: &'static str,
-    contents: &'static str,
-}
-
-const ADDON_FILES: &[ResourceFile] = &[
-    ResourceFile {
-        path: GDX_TOOLS_CREATE_SCENE_GD,
-        contents: include_str!("../../resources/addons/gdx_tools/create_scene.gd"),
-    },
-    ResourceFile {
-        path: GDX_TOOLS_AUTOMATION_GD,
-        contents: include_str!("../../resources/addons/gdx_tools/automation.gd"),
-    },
-    ResourceFile {
-        path: GDX_RUNTIME_CAPTURE_RUNNER_GD,
-        contents: include_str!("../../resources/addons/gdx_runtime/capture_runner.gd"),
-    },
-    ResourceFile {
-        path: GDX_RUNTIME_CAPTURE_RUNNER_TSCN,
-        contents: include_str!("../../resources/addons/gdx_runtime/capture_runner.tscn"),
-    },
-    ResourceFile {
-        path: GDX_DAEMON_SERVER_GD,
-        contents: include_str!("../../resources/addons/gdx_daemon/daemon_server.gd"),
-    },
-    ResourceFile {
-        path: GDX_DAEMON_SERVER_TSCN,
-        contents: include_str!("../../resources/addons/gdx_daemon/daemon_server.tscn"),
-    },
-];
 
 pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::Value> {
     if args.name.trim().is_empty() {
@@ -103,15 +69,6 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
         "project": godot_path_string(&target),
         "files": files
     }))
-}
-
-pub(crate) fn install_gdx_addons(project: &Path) -> GdxResult<Vec<String>> {
-    let mut files = Vec::new();
-    for file in ADDON_FILES {
-        write_text(&project.join(Path::new(file.path)), file.contents)?;
-        files.push(file.path.to_string());
-    }
-    Ok(files)
 }
 
 pub(crate) fn ensure_gdx_gitignore(project: &Path) -> GdxResult<bool> {

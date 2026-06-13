@@ -12,6 +12,7 @@ When combined with a remote agent operator such as [`agent-relay`](https://githu
 
 - Create a new Godot project and configure its main scene.
 - Install the `gdx` runtime addons into an existing Godot project.
+- Update installed project addons to the runtime bundled with the current `gdx` CLI.
 - Set project settings, autoloads, and input map entries.
 - Copy, import, and inspect assets.
 - Create, attach, parse-check, and load-check GDScript files.
@@ -61,6 +62,13 @@ Attach to an existing project:
 ```powershell
 gdx --project C:\Path\To\GodotProject project install
 gdx --project C:\Path\To\GodotProject project inspect
+```
+
+Update an already attached project after rebuilding or upgrading `gdx`:
+
+```powershell
+gdx --project C:\Path\To\GodotProject project update
+gdx --project C:\Path\To\GodotProject daemon start --restart
 ```
 
 Build and verify project files:
