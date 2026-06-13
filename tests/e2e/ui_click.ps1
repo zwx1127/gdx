@@ -101,7 +101,18 @@ if ($SceneText -notmatch "res://scripts/main.gd") { throw "Saved scene does not 
 if ($SceneText -notmatch "script = ExtResource") { throw "Saved scene does not attach root script" }
 
 try {
-    Invoke-Native $Bin @Common --project $Work daemon start --width 400 --height 300 --restart
+    $Start = Invoke-Json $Bin @Common --project $Work daemon start --width 400 --height 300 --restart
+    if ($Start.ok -ne $true) { throw "daemon start did not return ok JSON" }
+    if ($Start.capabilities.status -ne "known") { throw "daemon start did not report known capabilities" }
+    if ($Start.capabilities.methods -notcontains "click_node") { throw "daemon capabilities missing click_node" }
+    if ($Start.capabilities.methods -notcontains "activate_node") { throw "daemon capabilities missing activate_node" }
+
+    $Status = Invoke-Json $Bin --project $Work daemon status
+    if ($Status.running -ne $true) { throw "Expected daemon status to be running" }
+    if ($Status.capabilities.status -ne "known") { throw "daemon status did not report known capabilities" }
+
+    $Tree = Invoke-Json $Bin --project $Work scene tree --include-script --include-groups --include-methods
+    if ($Tree.tree.methods -notcontains "gdx_state") { throw "scene tree diagnostics missing gdx_state method" }
 
     $Before = Invoke-Json $Bin --project $Work state get --target "/" --method gdx_state
     if ([int]$Before.result.state.clicks -ne 0) { throw "Expected zero clicks before input" }

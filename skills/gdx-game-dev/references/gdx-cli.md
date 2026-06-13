@@ -69,6 +69,7 @@ gdx --project .\demo resource inspect --path res://materials/basic.tres
 gdx --project .\demo daemon start --restart --width 1280 --height 720
 gdx --project .\demo daemon status
 gdx --project .\demo scene tree
+gdx --project .\demo scene tree --include-script --include-groups --include-methods
 gdx --project .\demo node create --parent / --type Label --name Status
 gdx --project .\demo node set --node /Status --property text --value "Ready"
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
@@ -83,7 +84,9 @@ gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
-`daemon start` uses the configured main scene unless `--scene res://...` is supplied.
+`daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` include runtime capabilities when the installed daemon supports the capabilities RPC.
+
+Use `scene tree --include-methods` to find `gdx_*` automation entrypoints. Treat method candidates as diagnostics only; choose the target explicitly.
 
 ## Verify Specs
 
@@ -126,3 +129,5 @@ When a command fails:
 6. Re-run the narrowest failing command before continuing.
 
 Do not infer success from process output text. Use the JSON `ok` field and expected artifacts such as created scenes or non-empty screenshots.
+
+If `error` is `godot_native_crash`, inspect the Godot logs and local Godot/runtime environment. gdx does not automatically switch Godot binaries. If `error` is `daemon_runtime_outdated`, run `project install` and restart the daemon.

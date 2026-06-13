@@ -8,7 +8,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::constants::GDX_TOOLS_AUTOMATION_RES;
-use crate::diagnostics::attach_log_diagnostics;
+use crate::diagnostics::{attach_log_diagnostics, classify_logs};
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
 
@@ -124,11 +124,30 @@ pub fn run_version(binary: &Path, timeout_secs: u64) -> GdxResult<String> {
             let status = child.wait().map_err(|err| {
                 GdxError::tool("wait_failed", format!("Cannot collect Godot status: {err}"))
             })?;
+            if !status.success() {
+                let status_code = status.code().unwrap_or(-1);
+                if is_native_crash(status_code, &stdout_log, &stderr_log) {
+                    return Err(native_crash_error(
+                        "Godot crashed while running --version",
+                        status_code,
+                        &stdout_log,
+                        &stderr_log,
+                    ));
+                }
+                let message = if stderr.trim().is_empty() {
+                    format!(
+                        "Godot --version exited with status {}",
+                        format_status_code(status_code)
+                    )
+                } else {
+                    stderr.trim().to_string()
+                };
+                return Err(GdxError::tool("godot_failed", message)
+                    .with_artifact("stdout_log", godot_path_string(&stdout_log))
+                    .with_artifact("stderr_log", godot_path_string(&stderr_log)));
+            }
             let _ = fs::remove_file(&stdout_log);
             let _ = fs::remove_file(&stderr_log);
-            if !status.success() {
-                return Err(GdxError::tool("godot_failed", stderr.trim().to_string()));
-            }
             return Ok(stdout.trim().to_string());
         }
         if started.elapsed() >= Duration::from_secs(timeout_secs) {
@@ -211,7 +230,16 @@ pub fn run(command: GodotCommand) -> GdxResult<GodotRunResult> {
 }
 
 pub fn godot_failed(result: &GodotRunResult) -> GdxError {
-    let mut error = if let Some(last_json) = &result.last_json {
+    let native_crash = is_native_crash(result.status_code, &result.stdout_log, &result.stderr_log);
+    let mut error = if native_crash {
+        GdxError::tool(
+            "godot_native_crash",
+            format!(
+                "Godot crashed in native code with status {}",
+                format_status_code(result.status_code)
+            ),
+        )
+    } else if let Some(last_json) = &result.last_json {
         if last_json.get("ok").and_then(Value::as_bool) == Some(false) {
             let code = last_json
                 .get("error")
@@ -235,9 +263,46 @@ pub fn godot_failed(result: &GodotRunResult) -> GdxError {
 
     error = error
         .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
-        .with_artifact("stderr_log", godot_path_string(&result.stderr_log))
-        .with_suggestion("Open the stderr log and fix the first Godot error.");
+        .with_artifact("stderr_log", godot_path_string(&result.stderr_log));
+    error = if native_crash {
+        error.with_suggestion(
+            "Godot crashed before gdx received runtime JSON. Inspect the stderr log and the local Godot/runtime environment, or pass an explicit --godot/GDX_GODOT path.",
+        )
+    } else {
+        error.with_suggestion("Open the stderr log and fix the first Godot error.")
+    };
     attach_log_diagnostics(error, &result.stdout_log, &result.stderr_log)
+}
+
+fn native_crash_error(
+    context: &str,
+    status_code: i32,
+    stdout_log: &Path,
+    stderr_log: &Path,
+) -> GdxError {
+    let error = GdxError::tool(
+        "godot_native_crash",
+        format!("{context} with status {}", format_status_code(status_code)),
+    )
+    .with_artifact("stdout_log", godot_path_string(stdout_log))
+    .with_artifact("stderr_log", godot_path_string(stderr_log))
+    .with_suggestion(
+        "Godot crashed before gdx received runtime JSON. Inspect the stderr log and the local Godot/runtime environment, or pass an explicit --godot/GDX_GODOT path.",
+    );
+    attach_log_diagnostics(error, stdout_log, stderr_log)
+}
+
+fn is_native_crash(status_code: i32, stdout_log: &Path, stderr_log: &Path) -> bool {
+    status_code == 0xC0000005u32 as i32
+        || classify_logs(stdout_log, stderr_log) == Some("godot_native_crash")
+}
+
+fn format_status_code(status_code: i32) -> String {
+    if status_code < 0 {
+        format!("{status_code} ({:#010X})", status_code as u32)
+    } else {
+        status_code.to_string()
+    }
 }
 
 pub fn run_automation(
@@ -298,5 +363,20 @@ mod tests {
         assert_eq!(error.error, "save_failed");
         assert!(error.message.contains("ERR_CANT_CREATE"));
         assert_eq!(error.details.unwrap()["out"], "res://scenes/main.tscn");
+    }
+
+    #[test]
+    fn godot_failed_classifies_native_crash_status() {
+        let result = GodotRunResult {
+            status_code: 0xC0000005u32 as i32,
+            stdout_log: PathBuf::from("stdout.log"),
+            stderr_log: PathBuf::from("stderr.log"),
+            last_json: None,
+        };
+
+        let error = godot_failed(&result);
+
+        assert_eq!(error.error, "godot_native_crash");
+        assert!(error.message.contains("0xC0000005"));
     }
 }

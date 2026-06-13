@@ -52,6 +52,13 @@ pub fn diagnose_logs(stdout_log: &Path, stderr_log: &Path) -> Value {
     })
 }
 
+pub fn classify_logs(stdout_log: &Path, stderr_log: &Path) -> Option<&'static str> {
+    let stdout_tail = read_tail(stdout_log);
+    let stderr_tail = read_tail(stderr_log);
+    let combined = format!("{stdout_tail}\n{stderr_tail}");
+    classify(&combined)
+}
+
 pub fn read_tail(path: &Path) -> String {
     let text = fs::read_to_string(path).unwrap_or_default();
     if text.trim().is_empty() {
@@ -64,7 +71,12 @@ pub fn read_tail(path: &Path) -> String {
 
 fn classify(text: &str) -> Option<&'static str> {
     let lower = text.to_lowercase();
-    if lower.contains("warning treated as error")
+    if lower.contains("crashhandlerexception")
+        || lower.contains("program crashed with signal 11")
+        || lower.contains("0xc0000005")
+    {
+        Some("godot_native_crash")
+    } else if lower.contains("warning treated as error")
         || lower.contains("cannot infer the type")
         || lower.contains("will be typed as variant")
     {
@@ -102,6 +114,18 @@ mod tests {
         assert_eq!(
             classify("Parse Error: Unexpected identifier"),
             Some("gdscript_parse_error")
+        );
+    }
+
+    #[test]
+    fn classifies_native_crash() {
+        assert_eq!(
+            classify("CrashHandlerException: Program crashed with signal 11"),
+            Some("godot_native_crash")
+        );
+        assert_eq!(
+            classify("Godot exited with status 0xc0000005"),
+            Some("godot_native_crash")
         );
     }
 }

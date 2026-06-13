@@ -12,6 +12,10 @@ gdx doctor
 
 如果 `gdx` 不在 `PATH`，在 `cargo build --workspace` 后使用仓库二进制。如果找不到 Godot，设置 `GDX_GODOT` 或传入 `--godot`。
 
+## Godot 原生崩溃
+
+如果 stderr JSON 报告 `error: "godot_native_crash"`，或 diagnostics 中的 `primary_error` 是 `"godot_native_crash"`，说明 Godot 在 gdx 收到 runtime JSON 之前退出。先查看输出中附带的 Godot stdout/stderr 日志和本机 Godot/runtime 环境。gdx 会把它和 GDScript parse error 区分开，但不会自动切换 Godot 二进制。
+
 ## 缺少 main scene
 
 省略 `--scene` 时，`daemon start` 和 `capture run` 会使用项目配置的 main scene。
@@ -59,6 +63,17 @@ gdx --project .\demo daemon stop --force
 ```
 
 Daemon session 数据位于 `.gdx/daemon/session.json`。优先使用命令清理，不要手动删除文件。
+
+## Daemon runtime 旧于 CLI
+
+如果 input 或 verify step 报告 `daemon_runtime_outdated`，说明当前项目里运行的 daemon runtime 不支持这个 CLI 使用的 RPC 方法。重新安装内置 runtime 并重启 daemon：
+
+```powershell
+gdx --project .\demo project install
+gdx --project .\demo daemon start --restart
+```
+
+`daemon status` 会在 runtime 支持时报告 capabilities。capabilities 的 `status` 为 `unknown` 通常表示项目内 runtime 早于 capabilities RPC。
 
 ## 截图缺失或空白
 

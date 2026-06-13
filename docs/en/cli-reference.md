@@ -71,6 +71,7 @@ gdx --project .\demo resource inspect --path res://materials/basic.tres
 gdx --project .\demo daemon start --restart --width 1280 --height 720
 gdx --project .\demo daemon status
 gdx --project .\demo scene tree
+gdx --project .\demo scene tree --include-script --include-groups --include-methods
 gdx --project .\demo node create --parent / --type Label --name Status
 gdx --project .\demo node set --node /Status --property text --value "Ready"
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
@@ -85,7 +86,9 @@ gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
-`daemon start` uses the configured main scene unless `--scene res://...` is supplied.
+`daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` include daemon runtime capabilities when the installed runtime supports them; `status: "unknown"` means the project runtime is older than the capabilities RPC.
+
+`scene tree --include-methods` lists callable methods matching `--method-prefix`, which defaults to `gdx_`. These fields are diagnostic only; gdx does not auto-select alternate targets.
 
 ## Verify, capture, tests, and export
 

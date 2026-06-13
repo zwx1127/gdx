@@ -12,6 +12,10 @@ gdx doctor
 
 If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`. If Godot is not found, set `GDX_GODOT` or pass `--godot`.
 
+## Godot crashes in native code
+
+If stderr JSON reports `error: "godot_native_crash"` or diagnostics `primary_error: "godot_native_crash"`, Godot exited before gdx received runtime JSON. Check the included Godot stdout/stderr logs and the local Godot/runtime environment. gdx reports this distinctly from GDScript parse errors, but it does not switch Godot binaries automatically.
+
 ## Main scene is missing
 
 `daemon start` and `capture run` use the configured main scene when `--scene` is omitted.
@@ -59,6 +63,17 @@ gdx --project .\demo daemon stop --force
 ```
 
 Daemon session data lives under `.gdx/daemon/session.json`. Prefer command cleanup over deleting files manually.
+
+## Daemon runtime is older than the CLI
+
+If an input or verify step reports `daemon_runtime_outdated`, the running project daemon does not support an RPC method used by this CLI. Reinstall the bundled runtime and restart the daemon:
+
+```powershell
+gdx --project .\demo project install
+gdx --project .\demo daemon start --restart
+```
+
+`daemon status` reports runtime capabilities when supported. A capabilities `status` of `unknown` usually means the project runtime predates the capabilities RPC.
 
 ## Screenshot is missing or blank
 

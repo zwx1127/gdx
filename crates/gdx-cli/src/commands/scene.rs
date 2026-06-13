@@ -37,7 +37,19 @@ pub struct BuildArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct TreeArgs {}
+pub struct TreeArgs {
+    #[arg(long)]
+    pub include_script: bool,
+
+    #[arg(long)]
+    pub include_groups: bool,
+
+    #[arg(long)]
+    pub include_methods: bool,
+
+    #[arg(long, default_value = "gdx_")]
+    pub method_prefix: String,
+}
 
 #[derive(Debug, Args)]
 pub struct AddNodeArgs {
@@ -214,7 +226,17 @@ pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Va
 
 pub fn run_tree(ctx: &AppContext, _args: &TreeArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
-    let result = daemon::rpc(&project.root, "scene_tree", json!({}), 10)?;
+    let result = daemon::rpc(
+        &project.root,
+        "scene_tree",
+        json!({
+            "include_script": _args.include_script,
+            "include_groups": _args.include_groups,
+            "include_methods": _args.include_methods,
+            "method_prefix": _args.method_prefix,
+        }),
+        10,
+    )?;
     Ok(json!({
         "ok": true,
         "command": "scene.tree",

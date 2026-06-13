@@ -134,13 +134,15 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
     }
     if let Ok(existing) = daemon::read_session(&project.root) {
         if daemon::ping_session(&existing) {
+            let capabilities = capabilities_for_status(&existing);
             if !args.restart {
                 return Ok(json!({
                     "ok": true,
                     "command": "daemon.start",
                     "project": godot_path_string(&project.root),
                     "already_running": true,
-                    "session": existing
+                    "session": existing,
+                    "capabilities": capabilities
                 }));
             }
             let _ = daemon::rpc_session(&existing, "shutdown", json!({}), 3);
@@ -167,13 +169,15 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
         height: args.height,
     })?;
     daemon::write_session(&project.root, &session)?;
+    let capabilities = capabilities_for_status(&session);
 
     Ok(json!({
         "ok": true,
         "command": "daemon.start",
         "project": godot_path_string(&project.root),
         "already_running": false,
-        "session": session
+        "session": session,
+        "capabilities": capabilities
     }))
 }
 
@@ -195,12 +199,18 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
     match daemon::read_session(&project.root) {
         Ok(session) => {
             let running = daemon::ping_session(&session);
+            let capabilities = if running {
+                capabilities_for_status(&session)
+            } else {
+                serde_json::Value::Null
+            };
             Ok(json!({
                 "ok": true,
                 "command": "daemon.status",
                 "project": godot_path_string(&project.root),
                 "running": running,
-                "session": session
+                "session": session,
+                "capabilities": capabilities
             }))
         }
         Err(_) => Ok(json!({
@@ -208,8 +218,31 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
             "command": "daemon.status",
             "project": godot_path_string(&project.root),
             "running": false,
-            "session": null
+            "session": null,
+            "capabilities": null
         })),
+    }
+}
+
+fn capabilities_for_status(session: &daemon::DaemonSession) -> serde_json::Value {
+    match daemon::rpc_session(session, "capabilities", json!({}), 2) {
+        Ok(mut value) if value.is_object() => {
+            value["status"] = json!("known");
+            value
+        }
+        Ok(value) => json!({
+            "status": "known",
+            "value": value
+        }),
+        Err(err) if err.error == "unknown_method" => json!({
+            "status": "unknown",
+            "reason": "unsupported_capabilities_rpc"
+        }),
+        Err(err) => json!({
+            "status": "unknown",
+            "reason": err.error,
+            "message": err.message
+        }),
     }
 }
 

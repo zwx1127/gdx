@@ -71,6 +71,7 @@ gdx --project .\demo resource inspect --path res://materials/basic.tres
 gdx --project .\demo daemon start --restart --width 1280 --height 720
 gdx --project .\demo daemon status
 gdx --project .\demo scene tree
+gdx --project .\demo scene tree --include-script --include-groups --include-methods
 gdx --project .\demo node create --parent / --type Label --name Status
 gdx --project .\demo node set --node /Status --property text --value "Ready"
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
@@ -85,7 +86,9 @@ gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
-未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。
+未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。`daemon start` 和 `daemon status` 会在已安装 runtime 支持时返回 daemon runtime capabilities；`status: "unknown"` 表示项目内 runtime 早于 capabilities RPC。
+
+`scene tree --include-methods` 会列出匹配 `--method-prefix` 的可调用方法，默认前缀是 `gdx_`。这些字段只用于诊断；gdx 不会自动选择替代 target。
 
 ## Verify、截图、测试和导出
 

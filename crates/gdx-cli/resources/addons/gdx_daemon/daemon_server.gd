@@ -1,5 +1,24 @@
 extends Node
 
+const RUNTIME_VERSION := "0.1.0"
+const PROTOCOL_VERSION := 1
+const SUPPORTED_METHODS := [
+    "ping",
+    "shutdown",
+    "capabilities",
+    "scene_tree",
+    "add_node",
+    "set_property",
+    "save_scene",
+    "capture",
+    "input_event",
+    "input_click",
+    "click_node",
+    "activate_node",
+    "call_method",
+    "get_state",
+]
+
 var server := TCPServer.new()
 var clients: Array[Dictionary] = []
 var token := ""
@@ -32,7 +51,12 @@ func _ready() -> void:
         _fatal("listen_failed", "Cannot listen on 127.0.0.1:%s" % port)
         return
 
-    print(JSON.stringify({ "ok": true, "event": "daemon_ready", "port": port }))
+    print(JSON.stringify({
+        "ok": true,
+        "event": "daemon_ready",
+        "port": port,
+        "runtime": _runtime_info(),
+    }))
 
 func _process(_delta: float) -> void:
     _accept_clients()
@@ -86,15 +110,14 @@ func _handle_line(peer: StreamPeerTCP, line: String) -> void:
 
     match method:
         "ping":
-            _send_result(peer, id, { "pong": true })
+            _send_result(peer, id, { "pong": true, "runtime": _runtime_info() })
+        "capabilities":
+            _send_result(peer, id, _runtime_info())
         "shutdown":
             _send_result(peer, id, { "shutdown": true })
             get_tree().quit(0)
         "scene_tree":
-            if scene_root == null:
-                _send_error(peer, id, "scene_not_loaded", "No target scene loaded")
-            else:
-                _send_result(peer, id, _node_to_dict(scene_root, "/"))
+            _rpc_scene_tree(peer, id, params)
         "add_node":
             _rpc_add_node(peer, id, params)
         "set_property":
@@ -142,6 +165,18 @@ func _rpc_add_node(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
     node.owner = scene_root
     _set_owner_recursive(node, scene_root)
     _send_result(peer, id, { "path": _path_for_node(node), "type": type_name, "name": node.name })
+
+func _rpc_scene_tree(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    if scene_root == null:
+        _send_error(peer, id, "scene_not_loaded", "No target scene loaded")
+        return
+    var options := {
+        "include_script": bool(params.get("include_script", false)),
+        "include_groups": bool(params.get("include_groups", false)),
+        "include_methods": bool(params.get("include_methods", false)),
+        "method_prefix": str(params.get("method_prefix", "gdx_")),
+    }
+    _send_result(peer, id, _node_to_dict(scene_root, "/", options))
 
 func _rpc_set_property(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
     var node_path := str(params.get("node", ""))
@@ -314,7 +349,11 @@ func _rpc_call_method(peer: StreamPeerTCP, id: String, params: Dictionary) -> vo
         _send_error(peer, id, "target_not_found", "Target not found: %s" % target_path)
         return
     if not target.has_method(method):
-        _send_error(peer, id, "method_not_found", "Method not found: %s" % method)
+        _send_error(peer, id, "method_not_found", "Method not found: %s" % method, {
+            "target": target_path,
+            "method": method,
+            "candidates": _method_candidates(method),
+        })
         return
     var args: Array = params.get("args", [])
     var converted: Array = []
@@ -454,16 +493,67 @@ func _resolve_target(path: String) -> Object:
         return get_tree().root.get_node_or_null(NodePath(path.substr(6)))
     return _resolve_node(path)
 
-func _node_to_dict(node: Node, path: String) -> Dictionary:
+func _runtime_info() -> Dictionary:
+    return {
+        "runtime_version": RUNTIME_VERSION,
+        "protocol_version": PROTOCOL_VERSION,
+        "methods": SUPPORTED_METHODS.duplicate(),
+    }
+
+func _node_to_dict(node: Node, path: String, options: Dictionary = {}) -> Dictionary:
     var children: Array = []
     for child in node.get_children():
-        children.append(_node_to_dict(child, _path_for_node(child)))
-    return {
+        children.append(_node_to_dict(child, _path_for_node(child), options))
+    var result := {
         "path": path,
         "name": node.name,
         "type": node.get_class(),
         "children": children,
     }
+    if bool(options.get("include_script", false)):
+        var script = node.get_script()
+        if script != null:
+            result["script"] = str(script.resource_path)
+            if script.has_method("get_global_name"):
+                result["script_class"] = str(script.call("get_global_name"))
+    if bool(options.get("include_groups", false)):
+        result["groups"] = _node_groups(node)
+    if bool(options.get("include_methods", false)):
+        result["methods"] = _callable_methods(node, str(options.get("method_prefix", "gdx_")))
+    return result
+
+func _node_groups(node: Node) -> Array:
+    var groups: Array = []
+    for group in node.get_groups():
+        groups.append(str(group))
+    groups.sort()
+    return groups
+
+func _callable_methods(node: Object, prefix: String) -> Array:
+    var methods: Array = []
+    for method_info in node.get_method_list():
+        var method_name := str(method_info.get("name", ""))
+        if prefix == "" or method_name.begins_with(prefix):
+            methods.append(method_name)
+    methods.sort()
+    return methods
+
+func _method_candidates(method: String) -> Array:
+    var candidates: Array = []
+    if scene_root == null or method == "":
+        return candidates
+    _collect_method_candidates(scene_root, method, candidates)
+    return candidates
+
+func _collect_method_candidates(node: Node, method: String, candidates: Array) -> void:
+    if node.has_method(method):
+        candidates.append({
+            "path": _path_for_node(node),
+            "name": str(node.name),
+            "type": node.get_class(),
+        })
+    for child in node.get_children():
+        _collect_method_candidates(child, method, candidates)
 
 func _path_for_node(node: Node) -> String:
     if node == scene_root:
@@ -593,8 +683,11 @@ func _to_shape3d(value: Dictionary):
 func _send_result(peer: StreamPeerTCP, id: String, result: Dictionary) -> void:
     _send(peer, { "ok": true, "id": id, "result": result })
 
-func _send_error(peer: StreamPeerTCP, id: String, code: String, message: String) -> void:
-    _send(peer, { "ok": false, "id": id, "error": code, "message": message })
+func _send_error(peer: StreamPeerTCP, id: String, code: String, message: String, details: Dictionary = {}) -> void:
+    var payload := { "ok": false, "id": id, "error": code, "message": message }
+    if not details.is_empty():
+        payload["details"] = details
+    _send(peer, payload)
 
 func _send(peer: StreamPeerTCP, payload: Dictionary) -> void:
     var line := JSON.stringify(payload) + "\n"

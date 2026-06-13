@@ -8,6 +8,10 @@ For project-facing troubleshooting documentation, see `../../../docs/en/troubles
 - If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`.
 - If Godot is not found, set `$env:GDX_GODOT = "C:\Path\To\Godot_v4.x.exe"` or pass `--godot`.
 
+## Godot Native Crash
+
+If stderr JSON reports `godot_native_crash`, Godot exited before gdx received runtime JSON. Inspect the attached Godot logs and local Godot/runtime environment. gdx reports the crash distinctly, but does not switch Godot binaries automatically.
+
 ## Missing Main Scene
 
 `daemon start` and `capture run` use the configured main scene when `--scene` is omitted.
@@ -51,6 +55,17 @@ gdx --project .\demo daemon stop --force
 ```
 
 Daemon session data lives under `.gdx/daemon/session.json`. Prefer command cleanup over deleting files manually.
+
+## Daemon Runtime Older Than CLI
+
+If input or verify reports `daemon_runtime_outdated`, reinstall the bundled runtime and restart the daemon:
+
+```powershell
+gdx --project <project> project install
+gdx --project <project> daemon start --restart
+```
+
+Use `daemon status` to inspect runtime capabilities when available.
 
 ## Screenshot Missing or Blank
 
