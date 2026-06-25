@@ -83,12 +83,22 @@ gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
 gdx --project .\demo input click --position 120 240
 gdx --project .\demo input click-node --target /StartButton
+gdx --project .\demo input touch --position 120 240 --pressed true
+gdx --project .\demo input tap --position 120 240
+gdx --project .\demo input drag --from 120 240 --to 220 260
+gdx --project .\demo input swipe --from 120 240 --to 220 240
+gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-distance 40
+gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
+
+`input click` 使用鼠标事件。移动端玩法如果监听 `InputEventScreenTouch` 或 `InputEventScreenDrag`，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`。
+
+`input sequence` 读取 `{ "events": [...] }` JSON。事件可以是 `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`、`{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }` 或 `{ "kind": "wait", "frames": 2 }`。
 
 未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。`daemon start` 和 `daemon status` 会在已安装 runtime 支持时返回 daemon runtime capabilities；`status: "unknown"` 表示项目内 runtime 早于 capabilities RPC。
 

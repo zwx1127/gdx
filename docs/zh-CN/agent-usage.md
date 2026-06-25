@@ -96,7 +96,7 @@ func gdx_state() -> Dictionary:
 gdx --project .\demo state get --target / --method gdx_state
 ```
 
-UI 流程优先使用 `input click-node`、`input activate` 和通过 `call invoke` 调用的项目级方法。只有坐标本身是测试对象时才使用坐标点击。
+UI 流程优先使用 `input click-node`、`input activate` 和通过 `call invoke` 调用的项目级方法。只有坐标本身是测试对象时才使用坐标点击。移动端玩法如果监听触摸事件，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`，不要用鼠标点击替代。
 
 ## Verify specs
 
@@ -115,7 +115,7 @@ UI 流程优先使用 `input click-node`、`input activate` 和通过 `call invo
 }
 ```
 
-每个 step 必须只包含一个 action。支持的 step key 是 `call`、`state`、`capture`、`input_click_node` 和 `input_activate`。
+每个 step 必须只包含一个 action。支持的 step key 是 `call`、`state`、`capture`、`input_click_node`、`input_activate`、`input_tap`、`input_drag`、`input_swipe`、`input_pinch` 和 `input_touch_sequence`。
 
 ## GDScript 注意事项
 

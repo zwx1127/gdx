@@ -86,7 +86,7 @@ gdx --project .\demo daemon start --restart
 - 截图前是否导入资源。
 - 截图分辨率是否足够。
 
-UI 回归优先使用 `verify --spec`、项目级方法、`input click-node` 或 `input activate`。
+UI 回归优先使用 `verify --spec`、项目级方法、`input click-node` 或 `input activate`。移动端玩法如果处理 `InputEventScreenTouch` 或 `InputEventScreenDrag`，使用 `input tap`、`input swipe`、`input pinch` 或 `input sequence` 等触控命令。
 
 ## Scene build 失败
 

@@ -83,6 +83,12 @@ gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
 gdx --project .\demo input click --position 120 240
 gdx --project .\demo input click-node --target /StartButton
+gdx --project .\demo input touch --position 120 240 --pressed true
+gdx --project .\demo input tap --position 120 240
+gdx --project .\demo input drag --from 120 240 --to 220 260
+gdx --project .\demo input swipe --from 120 240 --to 220 240
+gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-distance 40
+gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 gdx --project .\demo state get --target / --method gdx_state
@@ -93,6 +99,10 @@ gdx --project .\demo daemon stop
 `daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` include daemon runtime capabilities when the installed runtime supports them; `status: "unknown"` means the project runtime is older than the capabilities RPC.
 
 After rebuilding or upgrading `gdx`, run `gdx --project .\demo project update` and restart the daemon so the running project uses the bundled runtime.
+
+`input click` uses mouse events. For mobile gameplay that listens to `InputEventScreenTouch` or `InputEventScreenDrag`, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence`.
+
+`input sequence` reads `{ "events": [...] }` JSON. Events are `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`, `{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }`, or `{ "kind": "wait", "frames": 2 }`.
 
 `scene tree --include-methods` lists callable methods matching `--method-prefix`, which defaults to `gdx_`. These fields are diagnostic only; gdx does not auto-select alternate targets.
 

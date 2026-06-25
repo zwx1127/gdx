@@ -86,6 +86,9 @@ gdx --project .\demo input send --keycode 32
 gdx --project .\demo input send --mouse-button 1 --position 320 180
 gdx --project .\demo input click-node --target /StartButton
 gdx --project .\demo input activate --target /StartButton
+gdx --project .\demo input tap --position 320 180
+gdx --project .\demo input swipe --from 320 180 --to 320 80
+gdx --project .\demo input pinch --center 320 180 --start-distance 120 --end-distance 40
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 ```
 

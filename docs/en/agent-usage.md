@@ -96,7 +96,7 @@ Then query it:
 gdx --project .\demo state get --target / --method gdx_state
 ```
 
-For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test.
+For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence` instead of mouse clicks.
 
 ## Verify specs
 
@@ -115,7 +115,7 @@ Use `verify` for multi-step regression checks:
 }
 ```
 
-Each step must contain exactly one action. Supported step keys are `call`, `state`, `capture`, `input_click_node`, and `input_activate`.
+Each step must contain exactly one action. Supported step keys are `call`, `state`, `capture`, `input_click_node`, `input_activate`, `input_tap`, `input_drag`, `input_swipe`, `input_pinch`, and `input_touch_sequence`.
 
 ## GDScript caution
 

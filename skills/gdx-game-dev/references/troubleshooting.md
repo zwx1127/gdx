@@ -76,7 +76,7 @@ Use `daemon status` to inspect runtime capabilities when available.
 - For one-shot captures, pass `--scene res://...` if no main scene is set.
 - Re-run `asset import` if textures or resources are missing.
 
-For UI regressions, prefer `verify --spec` plus project-level `gdx_*` methods, `input click-node`, or `input activate`. Use coordinate clicks only when the test specifically needs coordinates.
+For UI regressions, prefer `verify --spec` plus project-level `gdx_*` methods, `input click-node`, or `input activate`. Use `input tap`, `input swipe`, `input pinch`, or `input sequence` for mobile gameplay that handles touch events. Use coordinate clicks only when the test specifically needs coordinates.
 
 ## Scene Build Fails
 

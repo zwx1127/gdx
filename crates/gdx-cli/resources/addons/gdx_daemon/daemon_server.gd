@@ -13,6 +13,7 @@ const SUPPORTED_METHODS := [
     "capture",
     "input_event",
     "input_click",
+    "touch_sequence",
     "click_node",
     "activate_node",
     "call_method",
@@ -27,6 +28,7 @@ var scene_out := ""
 var scene_root: Node = null
 var pending_capture: Dictionary = {}
 var pending_click: Dictionary = {}
+var pending_touch_sequence: Dictionary = {}
 
 func _ready() -> void:
     token = OS.get_environment("GDX_DAEMON_TOKEN")
@@ -62,6 +64,7 @@ func _process(_delta: float) -> void:
     _accept_clients()
     _read_clients()
     _tick_click()
+    _tick_touch_sequence()
     _tick_capture()
 
 func _accept_clients() -> void:
@@ -130,6 +133,8 @@ func _handle_line(peer: StreamPeerTCP, line: String) -> void:
             _rpc_input_event(peer, id, params)
         "input_click":
             _rpc_input_click(peer, id, params)
+        "touch_sequence":
+            _rpc_touch_sequence(peer, id, params)
         "click_node":
             _rpc_click_node(peer, id, params)
         "activate_node":
@@ -262,7 +267,7 @@ func _rpc_input_event(peer: StreamPeerTCP, id: String, params: Dictionary) -> vo
     _send_result(peer, id, { "kind": kind })
 
 func _rpc_input_click(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
-    if not pending_click.is_empty():
+    if not pending_click.is_empty() or not pending_touch_sequence.is_empty():
         _send_error(peer, id, "input_busy", "A click request is already pending")
         return
     var button := int(params.get("button", 1))
@@ -286,8 +291,29 @@ func _rpc_input_click(peer: StreamPeerTCP, id: String, params: Dictionary) -> vo
         "before": _ui_context(),
     }
 
+func _rpc_touch_sequence(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
+    if not pending_click.is_empty() or not pending_touch_sequence.is_empty():
+        _send_error(peer, id, "input_busy", "An input request is already pending")
+        return
+    var events = params.get("events", [])
+    if typeof(events) != TYPE_ARRAY:
+        _send_error(peer, id, "invalid_touch_sequence", "events must be an array")
+        return
+    if events.is_empty():
+        _send_error(peer, id, "invalid_touch_sequence", "events must not be empty")
+        return
+    pending_touch_sequence = {
+        "peer": peer,
+        "id": id,
+        "events": events,
+        "cursor": 0,
+        "wait_frames": 0,
+        "active": {},
+        "before": _touch_context({}),
+    }
+
 func _rpc_click_node(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
-    if not pending_click.is_empty():
+    if not pending_click.is_empty() or not pending_touch_sequence.is_empty():
         _send_error(peer, id, "input_busy", "A click request is already pending")
         return
     var target_path := str(params.get("target", ""))
@@ -430,6 +456,76 @@ func _tick_click() -> void:
     })
     pending_click = {}
 
+func _tick_touch_sequence() -> void:
+    if pending_touch_sequence.is_empty():
+        return
+    if int(pending_touch_sequence["wait_frames"]) > 0:
+        pending_touch_sequence["wait_frames"] = int(pending_touch_sequence["wait_frames"]) - 1
+        return
+    while int(pending_touch_sequence["wait_frames"]) <= 0:
+        var cursor := int(pending_touch_sequence["cursor"])
+        var events: Array = pending_touch_sequence["events"]
+        if cursor >= events.size():
+            var result_peer: StreamPeerTCP = pending_touch_sequence["peer"]
+            var result_id: String = pending_touch_sequence["id"]
+            var active: Dictionary = pending_touch_sequence["active"]
+            _send_result(result_peer, result_id, {
+                "kind": "touch_sequence",
+                "events": events.size(),
+                "before": pending_touch_sequence["before"],
+                "after": _touch_context(active),
+            })
+            pending_touch_sequence = {}
+            return
+        pending_touch_sequence["cursor"] = cursor + 1
+        var error := _process_touch_sequence_event(events[cursor])
+        if error != "":
+            var error_peer: StreamPeerTCP = pending_touch_sequence["peer"]
+            var error_id: String = pending_touch_sequence["id"]
+            pending_touch_sequence = {}
+            _send_error(error_peer, error_id, "invalid_touch_sequence", error)
+            return
+        if int(pending_touch_sequence["wait_frames"]) > 0:
+            return
+
+func _process_touch_sequence_event(raw_event) -> String:
+    if typeof(raw_event) != TYPE_DICTIONARY:
+        return "touch sequence events must be objects"
+    var event: Dictionary = raw_event
+    var kind := str(event.get("kind", ""))
+    match kind:
+        "wait":
+            var frames := int(event.get("frames", 0))
+            if frames < 0:
+                frames = 0
+            pending_touch_sequence["wait_frames"] = frames
+        "touch":
+            var touch_index := int(event.get("index", 0))
+            if touch_index < 0:
+                return "touch index must be greater than or equal to zero"
+            var touch_position: Vector2 = _to_variant({ "vec2": event.get("position", [0, 0]) })
+            var touch_pressed := bool(event.get("pressed", true))
+            _send_screen_touch(touch_index, touch_position, touch_pressed)
+            var touch_active: Dictionary = pending_touch_sequence["active"]
+            if touch_pressed:
+                touch_active[touch_index] = touch_position
+            else:
+                touch_active.erase(touch_index)
+            pending_touch_sequence["active"] = touch_active
+        "drag":
+            var drag_index := int(event.get("index", 0))
+            if drag_index < 0:
+                return "touch index must be greater than or equal to zero"
+            var drag_position: Vector2 = _to_variant({ "vec2": event.get("position", [0, 0]) })
+            var drag_relative: Vector2 = _to_variant({ "vec2": event.get("relative", [0, 0]) })
+            _send_screen_drag(drag_index, drag_position, drag_relative)
+            var drag_active: Dictionary = pending_touch_sequence["active"]
+            drag_active[drag_index] = drag_position
+            pending_touch_sequence["active"] = drag_active
+        _:
+            return "unknown touch event kind: %s" % kind
+    return ""
+
 func _send_mouse_motion(position: Vector2) -> void:
     if get_viewport().has_method("warp_mouse"):
         get_viewport().call("warp_mouse", position)
@@ -445,6 +541,35 @@ func _send_mouse_button(button: int, position: Vector2, pressed: bool) -> void:
     mouse.global_position = position
     mouse.pressed = pressed
     Input.parse_input_event(mouse)
+
+func _send_screen_touch(index: int, position: Vector2, pressed: bool) -> void:
+    var touch := InputEventScreenTouch.new()
+    touch.index = index
+    touch.position = position
+    touch.pressed = pressed
+    Input.parse_input_event(touch)
+
+func _send_screen_drag(index: int, position: Vector2, relative: Vector2) -> void:
+    var drag := InputEventScreenDrag.new()
+    drag.index = index
+    drag.position = position
+    drag.relative = relative
+    drag.velocity = Vector2.ZERO
+    Input.parse_input_event(drag)
+
+func _touch_context(active: Dictionary) -> Dictionary:
+    var indexes: Array = active.keys()
+    indexes.sort()
+    var touches: Array = []
+    for index in indexes:
+        touches.append({
+            "index": int(index),
+            "position": _json_safe(active[index]),
+        })
+    return {
+        "active_touch_indexes": indexes,
+        "active_touches": touches,
+    }
 
 func _ui_context() -> Dictionary:
     var viewport := get_viewport()
@@ -498,6 +623,13 @@ func _runtime_info() -> Dictionary:
         "runtime_version": RUNTIME_VERSION,
         "protocol_version": PROTOCOL_VERSION,
         "methods": SUPPORTED_METHODS.duplicate(),
+        "input": {
+            "key": true,
+            "mouse": true,
+            "touch": true,
+            "multi_touch": true,
+            "gestures": ["tap", "drag", "swipe", "pinch", "sequence"],
+        },
     }
 
 func _node_to_dict(node: Node, path: String, options: Dictionary = {}) -> Dictionary:

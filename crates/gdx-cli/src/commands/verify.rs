@@ -77,6 +77,16 @@ struct StepSpec {
     input_click_node: Option<ClickNodeStep>,
     #[serde(default)]
     input_activate: Option<ActivateStep>,
+    #[serde(default)]
+    input_tap: Option<TapStep>,
+    #[serde(default)]
+    input_drag: Option<DragStep>,
+    #[serde(default)]
+    input_swipe: Option<DragStep>,
+    #[serde(default)]
+    input_pinch: Option<PinchStep>,
+    #[serde(default)]
+    input_touch_sequence: Option<TouchSequenceStep>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,6 +123,45 @@ struct ClickNodeStep {
 #[derive(Debug, Deserialize)]
 struct ActivateStep {
     target: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TapStep {
+    position: Vec<f64>,
+    #[serde(default)]
+    index: u32,
+    #[serde(default = "default_click_frames")]
+    frames: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct DragStep {
+    from: Vec<f64>,
+    to: Vec<f64>,
+    #[serde(default)]
+    index: u32,
+    #[serde(default = "default_touch_steps")]
+    steps: u32,
+    #[serde(default = "default_touch_frames")]
+    frames: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct PinchStep {
+    center: Vec<f64>,
+    start_distance: f64,
+    end_distance: f64,
+    #[serde(default)]
+    angle: f64,
+    #[serde(default = "default_pinch_steps")]
+    steps: u32,
+    #[serde(default = "default_touch_frames")]
+    frames: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct TouchSequenceStep {
+    events: Vec<session::TouchEvent>,
 }
 
 pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
@@ -212,6 +261,11 @@ fn run_step(
         step.capture.is_some(),
         step.input_click_node.is_some(),
         step.input_activate.is_some(),
+        step.input_tap.is_some(),
+        step.input_drag.is_some(),
+        step.input_swipe.is_some(),
+        step.input_pinch.is_some(),
+        step.input_touch_sequence.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -297,6 +351,50 @@ fn run_step(
         )?;
         return Ok(json!({ "kind": "input_activate", "index": index, "result": result }));
     }
+    if let Some(tap) = &step.input_tap {
+        let events = session::tap_events(tap.position.clone(), tap.index, tap.frames)?;
+        let result = session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_tap", "index": index, "result": result }));
+    }
+    if let Some(drag) = &step.input_drag {
+        let events = session::drag_events(
+            drag.from.clone(),
+            drag.to.clone(),
+            drag.index,
+            drag.steps,
+            drag.frames,
+        )?;
+        let result = session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_drag", "index": index, "result": result }));
+    }
+    if let Some(swipe) = &step.input_swipe {
+        let events = session::drag_events(
+            swipe.from.clone(),
+            swipe.to.clone(),
+            swipe.index,
+            swipe.steps,
+            swipe.frames,
+        )?;
+        let result = session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_swipe", "index": index, "result": result }));
+    }
+    if let Some(pinch) = &step.input_pinch {
+        let events = session::pinch_events(
+            pinch.center.clone(),
+            pinch.start_distance,
+            pinch.end_distance,
+            pinch.angle,
+            pinch.steps,
+            pinch.frames,
+        )?;
+        let result = session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_pinch", "index": index, "result": result }));
+    }
+    if let Some(sequence) = &step.input_touch_sequence {
+        session::validate_touch_events(&sequence.events)?;
+        let result = session::run_touch_sequence_rpc(project_root, sequence.events.clone())?;
+        return Ok(json!({ "kind": "input_touch_sequence", "index": index, "result": result }));
+    }
 
     unreachable!("verify step variant count was checked")
 }
@@ -351,4 +449,16 @@ fn default_button() -> i64 {
 
 fn default_click_frames() -> u32 {
     2
+}
+
+fn default_touch_steps() -> u32 {
+    8
+}
+
+fn default_touch_frames() -> u32 {
+    1
+}
+
+fn default_pinch_steps() -> u32 {
+    10
 }

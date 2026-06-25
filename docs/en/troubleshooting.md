@@ -86,7 +86,7 @@ Check:
 - Assets were imported before capture.
 - Capture resolution is high enough for the target view.
 
-For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`.
+For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`. For mobile gameplay that handles `InputEventScreenTouch` or `InputEventScreenDrag`, use touch commands such as `input tap`, `input swipe`, `input pinch`, or `input sequence`.
 
 ## Scene build fails
 

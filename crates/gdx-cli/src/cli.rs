@@ -173,6 +173,12 @@ pub enum InputSubcommand {
     Send(session::InputArgs),
     Click(session::ClickArgs),
     ClickNode(session::ClickNodeArgs),
+    Touch(session::TouchArgs),
+    Tap(session::TapArgs),
+    Drag(session::DragArgs),
+    Swipe(session::DragArgs),
+    Pinch(session::PinchArgs),
+    Sequence(session::SequenceArgs),
     Activate(session::ActivateArgs),
 }
 
