@@ -18,7 +18,7 @@ gdx doctor
 
 ## 缺少 main scene
 
-省略 `--scene` 时，`daemon start` 和 `capture run` 会使用项目配置的 main scene。
+省略 `--scene` 时，`daemon start`、`capture run` 和 `capture record` 会使用项目配置的 main scene。
 
 可用以下任一方式修复：
 
@@ -87,6 +87,12 @@ gdx --project .\demo daemon start --restart
 - 截图分辨率是否足够。
 
 UI 回归优先使用 `verify --spec`、项目级方法、`input click-node` 或 `input activate`。移动端玩法如果处理 `InputEventScreenTouch` 或 `InputEventScreenDrag`，使用 `input tap`、`input swipe`、`input pinch` 或 `input sequence` 等触控命令。
+
+## 录制缺失或空白
+
+`capture record` 通过 Godot Movie Writer 写出 AVI，并会重新启动一个场景实例；它不会录制已经运行中的 daemon session。
+
+调试时使用 `.avi` 输出路径，并先保持较短的 `--duration` 和较低的 `--fps`。如果 Godot 退出但没有录制文件，优先查看 `artifacts.stderr_log`。
 
 ## Scene build 失败
 

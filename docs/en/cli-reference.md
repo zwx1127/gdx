@@ -111,8 +111,9 @@ After rebuilding or upgrading `gdx`, run `gdx --project .\demo project update` a
 ```powershell
 gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export\game.exe
 ```
 
-`capture run` starts a one-shot capture runner. `capture daemon` captures the current daemon session. Export requires `export_presets.cfg` and installed Godot export templates.
+`capture run` starts a one-shot screenshot runner. `capture daemon` captures the current daemon session. `capture record` starts a fresh scene with Godot Movie Writer and writes an AVI file; it does not record the current daemon session. Export requires `export_presets.cfg` and installed Godot export templates.

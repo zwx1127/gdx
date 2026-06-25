@@ -62,9 +62,10 @@ gdx --project C:\Path\To\Game project update
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 ```
 
-If the project has a configured main scene, `capture run` can omit `--scene`.
+If the project has a configured main scene, `capture run` and `capture record` can omit `--scene`. `capture record` launches the scene through Godot Movie Writer and writes an AVI recording.
 
 ## Next steps
 

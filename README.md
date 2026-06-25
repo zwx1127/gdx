@@ -2,11 +2,11 @@
 
 [中文](README.zh-CN.md) | English
 
-`gdx` is a Rust CLI for automating real Godot 4.x projects from scripts and AI agents. It wraps official Godot command-line workflows and exposes project setup, scene editing, runtime control, screenshots, tests, and exports through JSON-emitting commands.
+`gdx` is a Rust CLI for automating real Godot 4.x projects from scripts and AI agents. It wraps official Godot command-line workflows and exposes project setup, scene editing, runtime control, screenshots, recordings, tests, and exports through JSON-emitting commands.
 
 `gdx` is not a game migration framework or a game engine abstraction. The caller, often Codex or another coding agent, still owns game design, architecture, GDScript, scene specs, assets, and failure analysis. `gdx` provides a reliable automation layer around Godot.
 
-When combined with a remote agent operator such as [`agent-relay`](https://github.com/zwx1127/agent-relay), `gdx` can support remote Godot game development from chat. Godot, Codex, and project files stay on a trusted local machine, while you send prompts, approve actions, run checks, inspect screenshots, and steer the development loop from Telegram or Lark/Feishu.
+When combined with a remote agent operator such as [`agent-relay`](https://github.com/zwx1127/agent-relay), `gdx` can support remote Godot game development from chat. Godot, Codex, and project files stay on a trusted local machine, while you send prompts, approve actions, run checks, inspect screenshots or recordings, and steer the development loop from Telegram or Lark/Feishu.
 
 ## What you can do
 
@@ -18,6 +18,7 @@ When combined with a remote agent operator such as [`agent-relay`](https://githu
 - Create, attach, parse-check, and load-check GDScript files.
 - Create scenes directly or build scenes from JSON specs.
 - Start a local Godot daemon for live scene edits, input, method calls, state reads, and screenshots.
+- Record short Godot Movie Writer AVI clips from a freshly launched scene for animation review.
 - Run Godot test scripts and multi-step verification specs.
 - Build exports through Godot export presets.
 - Pair with [`agent-relay`](https://github.com/zwx1127/agent-relay) to operate a local Codex plus `gdx` workflow remotely from chat.
@@ -92,6 +93,12 @@ gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
+Record a short AVI from a freshly launched scene to review animation timing:
+
+```powershell
+gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+```
+
 Run a multi-step verification spec:
 
 ```powershell
@@ -119,7 +126,7 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 - [Troubleshooting](docs/en/troubleshooting.md)
 - [Developing gdx](docs/en/developing.md)
 
-The bundled Codex skill lives in [`skills/gdx-game-dev`](skills/gdx-game-dev/SKILL.md). It is intended for agents that need to build, modify, run, test, screenshot, and export Godot games through `gdx`.
+The bundled Codex skill lives in [`skills/gdx-game-dev`](skills/gdx-game-dev/SKILL.md). It is intended for agents that need to build, modify, run, test, screenshot, record, and export Godot games through `gdx`.
 
 For remote development, run Codex and `gdx` on the machine that has Godot installed, then use [`agent-relay`](https://github.com/zwx1127/agent-relay) as the chat control surface. This keeps file access, Godot execution, daemon sessions, and exports local while still letting you develop and review progress away from the workstation.
 
@@ -138,7 +145,7 @@ agent-relay project: <https://github.com/zwx1127/agent-relay>
 
 - CLI: Rust binary named `gdx`.
 - Runtime integration: Godot addons installed under `addons/gdx_*`.
-- Verification: script checks, Godot tests, daemon state calls, input, and screenshots.
+- Verification: script checks, Godot tests, daemon state calls, input, screenshots, and scene recordings.
 - Supported caller model: local scripts and AI agents.
 
 Known limitations:
@@ -146,6 +153,7 @@ Known limitations:
 - The CLI does not design or migrate games by itself.
 - `scene build` consumes a Godot-specific JSON spec; callers are responsible for generating the spec.
 - The daemon binds to `127.0.0.1` and is intended for trusted local automation.
+- `capture record` launches a fresh scene with Godot Movie Writer; it does not record the current daemon session.
 - Export requires Godot export presets and installed export templates.
 
 ## Contributing and support

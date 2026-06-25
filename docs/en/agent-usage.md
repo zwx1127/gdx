@@ -20,7 +20,7 @@ The agent owns:
 - Runtime addon installation.
 - Asset import.
 - Scene/resource creation.
-- Daemon input, calls, state reads, and captures.
+- Daemon input, calls, state reads, captures, and one-shot scene recordings.
 - Godot script checks, tests, verification, and exports.
 
 ## Command contract
@@ -72,7 +72,7 @@ Use this pattern when the workstation has Godot installed but the developer want
 2. Select the Godot project workspace from chat.
 3. Ask Codex to use the `gdx-game-dev` skill and drive `gdx` commands locally.
 4. Have Codex run `script check-all`, `test run`, `verify`, or targeted daemon/capture commands after changes.
-5. Send screenshots or generated artifacts back through the relay when visual review is needed.
+5. Send screenshots, recordings, or generated artifacts back through the relay when visual review is needed.
 
 This keeps Godot execution, daemon access, project files, and exports local. Treat chat messages, screenshots, logs, and agent output as potentially sensitive project data.
 
@@ -97,6 +97,8 @@ gdx --project .\demo state get --target / --method gdx_state
 ```
 
 For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence` instead of mouse clicks.
+
+For animation review, use `capture record --out .gdx/recording.avi --duration 3 --fps 60` after selecting the scene state you want to launch. This uses Godot Movie Writer and records a freshly started scene, not the current daemon session.
 
 ## Verify specs
 

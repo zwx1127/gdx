@@ -14,7 +14,7 @@ If stderr JSON reports `godot_native_crash`, Godot exited before gdx received ru
 
 ## Missing Main Scene
 
-`daemon start` and `capture run` use the configured main scene when `--scene` is omitted.
+`daemon start`, `capture run`, and `capture record` use the configured main scene when `--scene` is omitted.
 
 Fix with one of:
 
@@ -77,6 +77,11 @@ Use `daemon status` to inspect runtime capabilities when available.
 - Re-run `asset import` if textures or resources are missing.
 
 For UI regressions, prefer `verify --spec` plus project-level `gdx_*` methods, `input click-node`, or `input activate`. Use `input tap`, `input swipe`, `input pinch`, or `input sequence` for mobile gameplay that handles touch events. Use coordinate clicks only when the test specifically needs coordinates.
+
+## Recording Missing or Empty
+
+- `capture record` writes AVI files through Godot Movie Writer and launches a fresh scene; it does not record an already running daemon session.
+- Use a `.avi` output path, keep `--duration` and `--fps` small while debugging, and inspect `artifacts.stderr_log` when Godot exits without a recording.
 
 ## Scene Build Fails
 

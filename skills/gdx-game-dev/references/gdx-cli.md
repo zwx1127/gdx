@@ -91,6 +91,7 @@ gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 gdx --project .\demo daemon stop
 ```
 
@@ -101,6 +102,8 @@ gdx --project .\demo daemon stop
 `input sequence` reads `{ "events": [...] }` JSON. Events are `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`, `{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }`, or `{ "kind": "wait", "frames": 2 }`.
 
 Use `scene tree --include-methods` to find `gdx_*` automation entrypoints. Treat method candidates as diagnostics only; choose the target explicitly.
+
+Use `capture record` when animation timing needs review. It launches a fresh scene through Godot Movie Writer and writes an AVI file; it does not record the current daemon session.
 
 ## Verify Specs
 
@@ -125,11 +128,12 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 
 ```powershell
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export\game.exe
 ```
 
-`capture run` starts a one-shot capture runner. `capture daemon` captures the current daemon session. Export requires `export_presets.cfg` and installed Godot export templates.
+`capture run` starts a one-shot screenshot runner. `capture daemon` captures the current daemon session. `capture record` records a freshly launched scene to AVI through Godot Movie Writer. Export requires `export_presets.cfg` and installed Godot export templates.
 
 ## Failure Handling
 

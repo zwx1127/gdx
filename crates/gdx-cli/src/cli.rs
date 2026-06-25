@@ -214,6 +214,7 @@ pub struct CaptureCommand {
 pub enum CaptureSubcommand {
     Run(play::CaptureArgs),
     Daemon(session::CaptureArgs),
+    Record(play::RecordArgs),
 }
 
 #[derive(Debug, Args)]

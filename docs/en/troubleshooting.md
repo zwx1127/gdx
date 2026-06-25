@@ -18,7 +18,7 @@ If stderr JSON reports `error: "godot_native_crash"` or diagnostics `primary_err
 
 ## Main scene is missing
 
-`daemon start` and `capture run` use the configured main scene when `--scene` is omitted.
+`daemon start`, `capture run`, and `capture record` use the configured main scene when `--scene` is omitted.
 
 Fix with one of:
 
@@ -87,6 +87,12 @@ Check:
 - Capture resolution is high enough for the target view.
 
 For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`. For mobile gameplay that handles `InputEventScreenTouch` or `InputEventScreenDrag`, use touch commands such as `input tap`, `input swipe`, `input pinch`, or `input sequence`.
+
+## Recording is missing or empty
+
+`capture record` writes AVI files through Godot Movie Writer and launches a fresh scene. It does not record an already running daemon session.
+
+Use a `.avi` output path, keep `--duration` and `--fps` small while debugging, and inspect `artifacts.stderr_log` when Godot exits without a recording.
 
 ## Scene build fails
 

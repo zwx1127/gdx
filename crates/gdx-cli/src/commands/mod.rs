@@ -96,6 +96,7 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
         Commands::Capture(command) => match &command.command {
             CaptureSubcommand::Run(args) => play::run_capture(&ctx, args),
             CaptureSubcommand::Daemon(args) => session::run_capture(&ctx, args),
+            CaptureSubcommand::Record(args) => play::run_record(&ctx, args),
         },
         Commands::Resource(command) => match &command.command {
             ResourceSubcommand::Create(args) => resource::run_create(&ctx, args),
@@ -317,6 +318,19 @@ mod tests {
                 "daemon",
                 "--out",
                 "shot.png",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "capture",
+                "record",
+                "--out",
+                "recording.avi",
+                "--duration",
+                "1.5",
+                "--fps",
+                "30",
             ],
         ] {
             let cli = parses(&args);

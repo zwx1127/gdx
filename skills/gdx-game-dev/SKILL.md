@@ -1,6 +1,6 @@
 ---
 name: gdx-game-dev
-description: Build, modify, run, test, screenshot, and export Godot 4.x games with the gdx CLI. Use when Codex needs to create a new Godot game project, attach to an existing Godot project, generate GDScript, build scenes/resources from JSON specs, edit a running scene through the gdx daemon, capture screenshots, send input, inspect game state, run Godot tests, or produce exports through gdx.
+description: Build, modify, run, test, screenshot, record, and export Godot 4.x games with the gdx CLI. Use when Codex needs to create a new Godot game project, attach to an existing Godot project, generate GDScript, build scenes/resources from JSON specs, edit a running scene through the gdx daemon, capture screenshots, record animation clips, send input, inspect game state, run Godot tests, or produce exports through gdx.
 ---
 
 # gdx Game Development
@@ -28,6 +28,7 @@ Use `gdx` as the Godot automation layer. Codex remains responsible for game desi
    - `gdx --project <project> test run --path res://tests/smoke_test.gd --method run_tests`
    - `gdx --project <project> verify --spec <project>\.gdx\verify.json`
    - For ad hoc runtime checks, use `daemon start --restart`, `call invoke`, `state get`, and `capture daemon`.
+   - For animation review, use `capture record --out <project>\.gdx\recording.avi --duration 3 --fps 60` to launch the scene with Godot Movie Writer and write an AVI clip.
    - Stop long-running sessions with `gdx --project <project> daemon stop`.
 
 ## Required Practices
@@ -37,7 +38,7 @@ Use `gdx` as the Godot automation layer. Codex remains responsible for game desi
 - Use `res://` paths for Godot project resources and ordinary filesystem paths only for external files, specs, and screenshots.
 - Prefer `scene build --spec <json>` for larger scene construction and daemon `node create` / `node set` for incremental edits to a running scene.
 - Add an explicit game-state method such as `gdx_state()` on important nodes when runtime verification needs structured state.
-- Run Godot-executing `gdx` commands outside the Codex sandbox by requesting sandbox escalation. This includes `asset import`, `script check-all`, `test run`, `daemon start`, `daemon stop`, `capture run`, `capture daemon`, `verify`, and `export build`, especially when the Godot project is outside the current Codex workspace. In Codex shell tool calls, use `sandbox_permissions: "require_escalated"` with a clear justification because Godot writes `.gdx/`, `.godot/imported/`, and `user://` logs, may open a render window, and may spawn daemon processes that are unreliable in the Windows sandbox.
+- Run Godot-executing `gdx` commands outside the Codex sandbox by requesting sandbox escalation. This includes `asset import`, `script check-all`, `test run`, `daemon start`, `daemon stop`, `capture run`, `capture daemon`, `capture record`, `verify`, and `export build`, especially when the Godot project is outside the current Codex workspace. In Codex shell tool calls, use `sandbox_permissions: "require_escalated"` with a clear justification because Godot writes `.gdx/`, `.godot/imported/`, and `user://` logs, may open a render window, and may spawn daemon processes that are unreliable in the Windows sandbox.
 - Prefer scoped approval prefixes such as `["gdx", "--project"]`, `["cargo", "build"]`, or the explicit repo binary path. Do not ask for broad PowerShell, Python, or shell-wrapper approvals just to run gdx.
 - If sandbox escalation is unavailable or denied, report that runtime verification must be run from Codex Full access mode or an external terminal, then continue with read-only/code analysis inside Codex.
 - Prefer project-level automation methods such as `gdx_start_run()` with `call invoke` for game UI regressions. Use `input click-node` or `input activate` for generic controls; use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence` for mobile gameplay that handles touch events. Avoid coordinate clicks unless the coordinate itself is under test.

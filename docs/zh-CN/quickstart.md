@@ -62,9 +62,10 @@ gdx --project C:\Path\To\Game project update
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 ```
 
-如果项目已经配置 main scene，`capture run` 可以省略 `--scene`。
+如果项目已经配置 main scene，`capture run` 和 `capture record` 都可以省略 `--scene`。`capture record` 会通过 Godot Movie Writer 启动场景并写出 AVI 录制文件。
 
 ## 下一步
 

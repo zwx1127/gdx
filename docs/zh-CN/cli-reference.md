@@ -111,8 +111,9 @@ gdx --project .\demo daemon stop
 ```powershell
 gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export\game.exe
 ```
 
-`capture run` 启动一次性截图 runner。`capture daemon` 截取当前 daemon session。导出需要 `export_presets.cfg` 和已安装的 Godot export templates。
+`capture run` 启动一次性截图 runner。`capture daemon` 截取当前 daemon session。`capture record` 使用 Godot Movie Writer 启动一个新的场景实例并写出 AVI，不会录制当前 daemon session。导出需要 `export_presets.cfg` 和已安装的 Godot export templates。

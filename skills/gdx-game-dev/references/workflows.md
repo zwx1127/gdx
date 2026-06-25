@@ -41,12 +41,13 @@ gdx --project C:\Path\To\Game daemon start --restart
 3. Generate a scene spec JSON with top-level `out` and `root`.
 4. Run `scene build --spec <json>`.
 5. Run `script check-all`.
-6. Run `verify --spec <json>` for runtime checks, or start daemon/capture one-shot for narrow visual checks.
+6. Run `verify --spec <json>` for runtime checks, use `capture run` for narrow screenshot checks, or use `capture record` for short animation review clips.
 
 ```powershell
 gdx --project .\demo scene build --spec .\main_scene.json
 gdx --project .\demo script check-all
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 ```
 
 `script check-all` is strict and runs Godot's parser over `.gd` files. Use `script load-check` only for the older fast resource-load check.

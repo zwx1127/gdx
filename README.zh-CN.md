@@ -92,6 +92,12 @@ gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
+录制一个从场景重新启动开始的短 AVI，用于检查动画节奏：
+
+```powershell
+gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+```
+
 运行多步骤 verify spec：
 
 ```powershell

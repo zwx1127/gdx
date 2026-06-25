@@ -20,7 +20,7 @@ Agent 负责：
 - Runtime addon 安装。
 - 资源导入。
 - 场景和资源创建。
-- Daemon 输入、方法调用、状态读取和截图。
+- Daemon 输入、方法调用、状态读取、截图和一次性场景录制。
 - Godot 脚本检查、测试、验证和导出。
 
 ## 命令契约
@@ -72,7 +72,7 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 2. 在聊天工具里选择 Godot 项目 workspace。
 3. 要求 Codex 使用 `gdx-game-dev` skill，并在本地驱动 `gdx` 命令。
 4. 改动后让 Codex 运行 `script check-all`、`test run`、`verify`，或有针对性的 daemon/capture 命令。
-5. 需要视觉审阅时，通过 relay 把截图或生成产物发回聊天窗口。
+5. 需要视觉审阅时，通过 relay 把截图、录制文件或生成产物发回聊天窗口。
 
 这种模式会把 Godot 执行、daemon 访问、项目文件和导出产物留在本地。聊天消息、截图、日志和 agent 输出都应视为可能包含敏感项目数据。
 
@@ -97,6 +97,8 @@ gdx --project .\demo state get --target / --method gdx_state
 ```
 
 UI 流程优先使用 `input click-node`、`input activate` 和通过 `call invoke` 调用的项目级方法。只有坐标本身是测试对象时才使用坐标点击。移动端玩法如果监听触摸事件，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`，不要用鼠标点击替代。
+
+需要审阅动画节奏时，使用 `capture record --out .gdx/recording.avi --duration 3 --fps 60`。它通过 Godot Movie Writer 录制重新启动的场景，不会录制当前 daemon session。
 
 ## Verify specs
 

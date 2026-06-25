@@ -115,7 +115,7 @@ pub fn run_attach(ctx: &AppContext, args: &AttachArgs) -> GdxResult<serde_json::
             "scene": args.scene,
             "node": args.node,
             "script": args.script,
-            "out": args.out
+            "out": out
         }),
         60,
     )?;
