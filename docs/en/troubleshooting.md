@@ -69,11 +69,14 @@ Daemon session data lives under `.gdx/daemon/session.json`. Prefer command clean
 If an input or verify step reports `daemon_runtime_outdated`, the running project daemon does not support an RPC method used by this CLI. Update the bundled runtime and restart the daemon:
 
 ```powershell
+gdx --project .\demo project update --check
 gdx --project .\demo project update
 gdx --project .\demo daemon start --restart
 ```
 
-`daemon status` reports runtime capabilities when supported. A capabilities `status` of `unknown` usually means the project runtime predates the capabilities RPC.
+`daemon status` promotes `runtime_status`, `runtime_version`, `protocol_version`, `methods`, and `warnings` at the top level. `runtime_status: "unknown"` means the project runtime predates the capabilities RPC; `runtime_status: "outdated"` means the runtime is known but missing a capability such as `touch_sequence`.
+
+Touch commands and verify touch steps do not downgrade to mouse events. If the project runtime lacks `touch_sequence`, update the managed runtime files and restart the daemon.
 
 ## Screenshot is missing or blank
 
@@ -86,13 +89,13 @@ Check:
 - Assets were imported before capture.
 - Capture resolution is high enough for the target view.
 
-For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`. For mobile gameplay that handles `InputEventScreenTouch` or `InputEventScreenDrag`, use touch commands such as `input tap`, `input swipe`, `input pinch`, or `input sequence`.
+For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`. For mobile gameplay that handles `InputEventScreenTouch` or `InputEventScreenDrag`, use touch commands such as `input tap`, `input swipe`, `input pinch`, or `input sequence`. Touch commands require `touch_sequence` support in the daemon runtime and intentionally do not fall back to mouse events.
 
 ## Recording is missing or empty
 
 `capture record` writes AVI files through Godot Movie Writer and launches a fresh scene. It does not record an already running daemon session.
 
-Use a `.avi` output path, keep `--duration` and `--fps` small while debugging, and inspect `artifacts.stderr_log` when Godot exits without a recording.
+Use `capture record --input-sequence <json>` to replay touch events in that fresh scene while recording a gesture. Use a `.avi` output path, keep `--duration` and `--fps` small while debugging, and inspect `artifacts.stderr_log` when Godot exits without a recording.
 
 ## Scene build fails
 

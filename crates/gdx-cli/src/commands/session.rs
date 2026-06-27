@@ -65,8 +65,17 @@ pub struct InputArgs {
     #[arg(long, num_args = 2, allow_hyphen_values = true)]
     pub position: Option<Vec<f64>>,
 
-    #[arg(long, default_value_t = true)]
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        num_args = 0..=1,
+        default_value_t = true,
+        default_missing_value = "true"
+    )]
     pub pressed: bool,
+
+    #[arg(long, conflicts_with = "pressed")]
+    pub release: bool,
 }
 
 #[derive(Debug, Args)]
@@ -234,14 +243,14 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
         if daemon::ping_session(&existing) {
             let capabilities = capabilities_for_status(&existing);
             if !args.restart {
-                return Ok(json!({
-                    "ok": true,
-                    "command": "daemon.start",
-                    "project": godot_path_string(&project.root),
-                    "already_running": true,
-                    "session": existing,
-                    "capabilities": capabilities
-                }));
+                return Ok(daemon_session_response(
+                    "daemon.start",
+                    &project.root,
+                    true,
+                    Some(true),
+                    Some(&existing),
+                    capabilities,
+                ));
             }
             let _ = daemon::rpc_session(&existing, "shutdown", json!({}), 3);
             let _ = daemon::kill_process(existing.pid, true);
@@ -269,14 +278,14 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
     daemon::write_session(&project.root, &session)?;
     let capabilities = capabilities_for_status(&session);
 
-    Ok(json!({
-        "ok": true,
-        "command": "daemon.start",
-        "project": godot_path_string(&project.root),
-        "already_running": false,
-        "session": session,
-        "capabilities": capabilities
-    }))
+    Ok(daemon_session_response(
+        "daemon.start",
+        &project.root,
+        true,
+        Some(false),
+        Some(&session),
+        capabilities,
+    ))
 }
 
 fn resolve_scene(project: &std::path::Path, explicit: Option<&str>) -> GdxResult<String> {
@@ -302,24 +311,112 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
             } else {
                 serde_json::Value::Null
             };
-            Ok(json!({
-                "ok": true,
-                "command": "daemon.status",
-                "project": godot_path_string(&project.root),
-                "running": running,
-                "session": session,
-                "capabilities": capabilities
-            }))
+            Ok(daemon_session_response(
+                "daemon.status",
+                &project.root,
+                running,
+                None,
+                Some(&session),
+                capabilities,
+            ))
         }
-        Err(_) => Ok(json!({
-            "ok": true,
-            "command": "daemon.status",
-            "project": godot_path_string(&project.root),
-            "running": false,
-            "session": null,
-            "capabilities": null
-        })),
+        Err(_) => Ok(daemon_session_response(
+            "daemon.status",
+            &project.root,
+            false,
+            None,
+            None,
+            Value::Null,
+        )),
     }
+}
+
+fn daemon_session_response(
+    command: &str,
+    project_root: &Path,
+    running: bool,
+    already_running: Option<bool>,
+    session: Option<&daemon::DaemonSession>,
+    capabilities: Value,
+) -> Value {
+    let runtime_status = runtime_status_for(&capabilities);
+    let runtime_version = capabilities
+        .get("runtime_version")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let protocol_version = capabilities
+        .get("protocol_version")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let methods = capabilities
+        .get("methods")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let warnings = runtime_warnings(&capabilities);
+    let mut response = json!({
+        "ok": true,
+        "command": command,
+        "project": godot_path_string(project_root),
+        "running": running,
+        "pid": session.map(|session| session.pid),
+        "port": session.map(|session| session.port),
+        "scene": session.map(|session| session.scene.clone()),
+        "runtime_status": runtime_status,
+        "runtime_version": runtime_version,
+        "protocol_version": protocol_version,
+        "methods": methods,
+        "warnings": warnings,
+        "session": session,
+        "capabilities": capabilities
+    });
+    if let Some(already_running) = already_running {
+        response["already_running"] = json!(already_running);
+    }
+    response
+}
+
+fn runtime_status_for(capabilities: &Value) -> &'static str {
+    if capabilities.is_null() {
+        return "not_running";
+    }
+    if capabilities.get("status").and_then(Value::as_str) != Some("known") {
+        return "unknown";
+    }
+    if capabilities.get("methods").is_some()
+        && !capabilities_has_method(capabilities, "touch_sequence")
+    {
+        return "outdated";
+    }
+    "known"
+}
+
+fn runtime_warnings(capabilities: &Value) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if capabilities.is_null() {
+        return warnings;
+    }
+    if capabilities.get("status").and_then(Value::as_str) != Some("known") {
+        warnings.push(format!(
+            "Daemon runtime capabilities are unavailable. {}",
+            daemon::RUNTIME_UPDATE_SUGGESTION
+        ));
+    } else if capabilities.get("methods").is_some()
+        && !capabilities_has_method(capabilities, "touch_sequence")
+    {
+        warnings.push(format!(
+            "Daemon runtime is missing touch_sequence. {}",
+            daemon::RUNTIME_UPDATE_SUGGESTION
+        ));
+    }
+    warnings
+}
+
+fn capabilities_has_method(capabilities: &Value, method: &str) -> bool {
+    capabilities
+        .get("methods")
+        .and_then(Value::as_array)
+        .map(|methods| methods.iter().any(|value| value.as_str() == Some(method)))
+        .unwrap_or(false)
 }
 
 fn capabilities_for_status(session: &daemon::DaemonSession) -> serde_json::Value {
@@ -342,6 +439,54 @@ fn capabilities_for_status(session: &daemon::DaemonSession) -> serde_json::Value
             "message": err.message
         }),
     }
+}
+
+fn read_capabilities(session: &daemon::DaemonSession) -> GdxResult<Value> {
+    match daemon::rpc_session(session, "capabilities", json!({}), 2) {
+        Ok(mut value) if value.is_object() => {
+            value["status"] = json!("known");
+            Ok(value)
+        }
+        Ok(value) => Ok(json!({
+            "status": "known",
+            "value": value
+        })),
+        Err(err) => Err(err),
+    }
+}
+
+pub(crate) fn ensure_touch_sequence_supported(project_root: &Path) -> GdxResult<()> {
+    let session = daemon::read_session(project_root)?;
+    let capabilities = match read_capabilities(&session) {
+        Ok(capabilities) => capabilities,
+        Err(err) if err.error == "unknown_method" => {
+            return Err(touch_sequence_outdated_error(
+                project_root,
+                json!({
+                    "status": "unknown",
+                    "reason": "unsupported_capabilities_rpc"
+                }),
+            ));
+        }
+        Err(err) => return Err(err),
+    };
+    if capabilities_has_method(&capabilities, "touch_sequence") {
+        return Ok(());
+    }
+    Err(touch_sequence_outdated_error(project_root, capabilities))
+}
+
+fn touch_sequence_outdated_error(project_root: &Path, capabilities: Value) -> GdxError {
+    GdxError::tool(
+        "daemon_runtime_outdated",
+        "Daemon runtime does not support RPC method: touch_sequence",
+    )
+    .with_details(json!({
+        "requested_rpc_method": "touch_sequence",
+        "project": godot_path_string(project_root),
+        "capabilities": capabilities
+    }))
+    .with_suggestion(daemon::RUNTIME_UPDATE_SUGGESTION)
 }
 
 pub fn run_stop(ctx: &AppContext, args: &StopArgs) -> GdxResult<serde_json::Value> {
@@ -397,14 +542,15 @@ pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json
 pub fn run_input(ctx: &AppContext, args: &InputArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
     let position = args.position.clone().unwrap_or_else(|| vec![0.0, 0.0]);
+    let pressed = if args.release { false } else { args.pressed };
     let params = if let Some(keycode) = args.keycode {
-        json!({ "kind": "key", "keycode": keycode, "pressed": args.pressed })
+        json!({ "kind": "key", "keycode": keycode, "pressed": pressed })
     } else if let Some(button) = args.mouse_button {
         json!({
             "kind": "mouse_button",
             "button": button,
             "position": position,
-            "pressed": args.pressed
+            "pressed": pressed
         })
     } else {
         json!({ "kind": "mouse_motion", "position": position })
@@ -529,6 +675,7 @@ pub(crate) fn run_touch_sequence_rpc(
     events: Vec<TouchEvent>,
 ) -> GdxResult<Value> {
     validate_touch_events(&events)?;
+    ensure_touch_sequence_supported(project_root)?;
     let timeout = touch_timeout(&events);
     daemon::rpc(
         project_root,
@@ -710,7 +857,7 @@ pub(crate) fn validate_touch_events(events: &[TouchEvent]) -> GdxResult<()> {
     Ok(())
 }
 
-fn read_touch_sequence(ctx: &AppContext, spec: &Path) -> GdxResult<Vec<TouchEvent>> {
+pub(crate) fn read_touch_sequence(ctx: &AppContext, spec: &Path) -> GdxResult<Vec<TouchEvent>> {
     let value = read_json_file(ctx, spec)?;
     let spec: TouchSequenceSpec = serde_json::from_value(value).map_err(|err| {
         GdxError::user(
@@ -804,6 +951,84 @@ pub fn run_activate(ctx: &AppContext, args: &ActivateArgs) -> GdxResult<serde_js
 mod tests {
     use super::*;
 
+    #[test]
+    fn state_request_params_omits_missing_optionals() {
+        let params = state_request_params("/AutomationBridge", &None, &None);
+
+        assert_eq!(params["target"], "/AutomationBridge");
+        assert!(params.get("method").is_none());
+        assert!(params.get("property").is_none());
+    }
+
+    #[test]
+    fn state_request_params_keeps_explicit_method_and_property() {
+        let params = state_request_params(
+            "/",
+            &Some("gdx_state".to_string()),
+            &Some("score".to_string()),
+        );
+
+        assert_eq!(params["method"], "gdx_state");
+        assert_eq!(params["property"], "score");
+    }
+
+    #[test]
+    fn daemon_response_promotes_runtime_fields_and_warnings() {
+        let session = daemon::DaemonSession {
+            pid: 123,
+            port: 9999,
+            token: "secret".to_string(),
+            scene: "res://main.tscn".to_string(),
+            stdout_log: ".gdx/daemon/stdout.log".to_string(),
+            stderr_log: ".gdx/daemon/stderr.log".to_string(),
+            started_at: 1,
+        };
+        let capabilities = json!({
+            "status": "known",
+            "runtime_version": "0.0.1",
+            "protocol_version": 1,
+            "methods": ["ping", "input_event"]
+        });
+
+        let value = daemon_session_response(
+            "daemon.status",
+            Path::new("D:/Game"),
+            true,
+            None,
+            Some(&session),
+            capabilities,
+        );
+
+        assert_eq!(value["pid"], 123);
+        assert_eq!(value["port"], 9999);
+        assert_eq!(value["scene"], "res://main.tscn");
+        assert_eq!(value["runtime_status"], "outdated");
+        assert_eq!(value["runtime_version"], "0.0.1");
+        assert_eq!(value["methods"].as_array().unwrap().len(), 2);
+        assert!(value["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("project update --check"));
+    }
+
+    #[test]
+    fn touch_sequence_outdated_error_mentions_update_check() {
+        let err = touch_sequence_outdated_error(
+            Path::new("D:/Game"),
+            json!({ "status": "known", "methods": ["input_event"] }),
+        );
+
+        assert_eq!(err.error, "daemon_runtime_outdated");
+        assert!(err
+            .suggestion
+            .as_deref()
+            .unwrap()
+            .contains("project update --check"));
+        assert_eq!(
+            err.details.unwrap()["requested_rpc_method"],
+            "touch_sequence"
+        );
+    }
     #[test]
     fn tap_expands_to_press_wait_release_wait() {
         let events = tap_events(vec![120.0, 240.0], 2, 3).unwrap();
@@ -913,17 +1138,28 @@ pub fn run_call(ctx: &AppContext, args: &CallArgs) -> GdxResult<serde_json::Valu
     }))
 }
 
+pub(crate) fn state_request_params(
+    target: &str,
+    method: &Option<String>,
+    property: &Option<String>,
+) -> Value {
+    let mut params = json!({ "target": target });
+    if let Some(method) = method {
+        params["method"] = json!(method);
+    }
+    if let Some(property) = property {
+        params["property"] = json!(property);
+    }
+    params
+}
+
 pub fn run_state(ctx: &AppContext, args: &StateArgs) -> GdxResult<serde_json::Value> {
     validate_non_empty("target", &args.target)?;
     let project = ctx.project()?;
     let result = daemon::rpc(
         &project.root,
         "get_state",
-        json!({
-            "target": args.target,
-            "method": args.method,
-            "property": args.property
-        }),
+        state_request_params(&args.target, &args.method, &args.property),
         10,
     )?;
     Ok(json!({

@@ -18,6 +18,8 @@ use crate::diagnostics::attach_log_diagnostics;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
 
+pub const RUNTIME_UPDATE_SUGGESTION: &str = "Run `gdx --project <project> project update --check` to inspect managed runtime file changes, then run `gdx --project <project> project update` and restart the daemon with `gdx --project <project> daemon start --restart`.";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonSession {
     pub pid: u32,
@@ -173,9 +175,7 @@ fn enrich_rpc_error(mut error: GdxError, project: &Path, method: &str) -> GdxErr
         format!("Daemon runtime does not support RPC method: {method}"),
     )
     .with_details(details)
-    .with_suggestion(
-        "Run `gdx --project <project> project install`, then restart the daemon with `gdx --project <project> daemon start --restart`.",
-    )
+    .with_suggestion(RUNTIME_UPDATE_SUGGESTION)
 }
 
 pub fn ping_session(session: &DaemonSession) -> bool {
@@ -400,7 +400,7 @@ mod tests {
             .suggestion
             .as_deref()
             .unwrap()
-            .contains("project install"));
+            .contains("project update --check"));
         assert_eq!(
             mapped.details.unwrap()["requested_rpc_method"],
             "activate_node"

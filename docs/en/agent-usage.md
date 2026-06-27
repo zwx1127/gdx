@@ -53,6 +53,7 @@ Existing project:
 ```powershell
 gdx --project C:\Path\To\Game project install
 gdx --project C:\Path\To\Game project inspect
+gdx --project C:\Path\To\Game project update --check
 ```
 
 Build and verify:
@@ -93,12 +94,15 @@ func gdx_state() -> Dictionary:
 Then query it:
 
 ```powershell
+gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 ```
 
-For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence` instead of mouse clicks.
+`state get --target /` defaults to `gdx_state()` when no method or property is supplied, and its result says whether the value came from a method or property.
 
-For animation review, use `capture record --out .gdx/recording.avi --duration 3 --fps 60` after selecting the scene state you want to launch. This uses Godot Movie Writer and records a freshly started scene, not the current daemon session.
+For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence` instead of mouse clicks. Touch commands require the daemon runtime to advertise `touch_sequence`; if they report `daemon_runtime_outdated`, run `project update --check`, update the managed runtime, and restart the daemon.
+
+For animation review, use `capture record --out .gdx/recording.avi --duration 3 --fps 60` after selecting the scene state you want to launch. Add `--input-sequence <json>` to replay touch events during recording. This uses Godot Movie Writer and records a freshly started scene, not the current daemon session.
 
 ## Verify specs
 

@@ -30,6 +30,7 @@ Use `project inspect` to find the main scene and existing project files. Avoid r
 After rebuilding or upgrading `gdx`, refresh an already attached project:
 
 ```powershell
+gdx --project C:\Path\To\Game project update --check
 gdx --project C:\Path\To\Game project update
 gdx --project C:\Path\To\Game daemon start --restart
 ```
@@ -48,6 +49,7 @@ gdx --project .\demo scene build --spec .\main_scene.json
 gdx --project .\demo script check-all
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
 gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
 ```
 
 `script check-all` is strict and runs Godot's parser over `.gd` files. Use `script load-check` only for the older fast resource-load check.
@@ -82,9 +84,11 @@ func gdx_state() -> Dictionary:
 Then call:
 
 ```powershell
+gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo input send --keycode 32
 gdx --project .\demo input send --mouse-button 1 --position 320 180
+gdx --project .\demo input send --mouse-button 1 --position 320 180 --release
 gdx --project .\demo input click-node --target /StartButton
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo input tap --position 320 180

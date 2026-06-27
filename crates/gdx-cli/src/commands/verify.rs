@@ -297,11 +297,7 @@ fn run_step(
         let result = daemon::rpc(
             project_root,
             "get_state",
-            json!({
-                "target": state.target,
-                "method": state.method,
-                "property": state.property
-            }),
+            session::state_request_params(&state.target, &state.method, &state.property),
             10,
         )?;
         return Ok(json!({ "kind": "state", "index": index, "result": result }));

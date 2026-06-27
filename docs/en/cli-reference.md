@@ -81,6 +81,8 @@ gdx --project .\demo node set --node /Status --property text --value "Ready"
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
 gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
+gdx --project .\demo input send --mouse-button 1 --position 120 240 --pressed false
+gdx --project .\demo input send --mouse-button 1 --position 120 240 --release
 gdx --project .\demo input click --position 120 240
 gdx --project .\demo input click-node --target /StartButton
 gdx --project .\demo input touch --position 120 240 --pressed true
@@ -91,18 +93,21 @@ gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-dis
 gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
+gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
-`daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` include daemon runtime capabilities when the installed runtime supports them; `status: "unknown"` means the project runtime is older than the capabilities RPC.
+`daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` promote `pid`, `port`, `scene`, `runtime_status`, `runtime_version`, `protocol_version`, `methods`, and `warnings` at the top level. `runtime_status: "unknown"` means the project runtime predates the capabilities RPC; `runtime_status: "outdated"` means capabilities are available but a method such as `touch_sequence` is missing.
 
-After rebuilding or upgrading `gdx`, run `gdx --project .\demo project update` and restart the daemon so the running project uses the bundled runtime.
+After rebuilding or upgrading `gdx`, run `gdx --project .\demo project update --check`, review the managed addon changes, then run `gdx --project .\demo project update` and restart the daemon so the running project uses the bundled runtime.
 
-`input click` uses mouse events. For mobile gameplay that listens to `InputEventScreenTouch` or `InputEventScreenDrag`, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence`.
+`input send --pressed` accepts `true` or `false`; `--release` is a clear alias for `--pressed false`. `input click` uses mouse events. For mobile gameplay that listens to `InputEventScreenTouch` or `InputEventScreenDrag`, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence`. Touch commands require a daemon runtime with `touch_sequence`; they report `daemon_runtime_outdated` instead of falling back to mouse events.
 
 `input sequence` reads `{ "events": [...] }` JSON. Events are `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`, `{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }`, or `{ "kind": "wait", "frames": 2 }`.
+
+`state get --target /` omits `method` and `property`, so the runtime defaults to `gdx_state()` when the target implements it. The result includes `target`, `source`, `method` or `property`, and `state` so null state values still show what was queried.
 
 `scene tree --include-methods` lists callable methods matching `--method-prefix`, which defaults to `gdx_`. These fields are diagnostic only; gdx does not auto-select alternate targets.
 
@@ -112,8 +117,9 @@ After rebuilding or upgrading `gdx`, run `gdx --project .\demo project update` a
 gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
 gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export\game.exe
 ```
 
-`capture run` starts a one-shot screenshot runner. `capture daemon` captures the current daemon session. `capture record` starts a fresh scene with Godot Movie Writer and writes an AVI file; it does not record the current daemon session. Export requires `export_presets.cfg` and installed Godot export templates.
+`capture run` starts a one-shot screenshot runner. `capture daemon` captures the current daemon session. `capture record` starts a fresh scene with Godot Movie Writer and writes an AVI file; it does not record the current daemon session. `capture record --input-sequence <json>` replays touch events in that fresh scene before Movie Writer frames are emitted, which is useful for gesture animation review. Export requires `export_presets.cfg` and installed Godot export templates.

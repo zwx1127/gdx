@@ -53,6 +53,7 @@ gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2
 ```powershell
 gdx --project C:\Path\To\Game project install
 gdx --project C:\Path\To\Game project inspect
+gdx --project C:\Path\To\Game project update --check
 ```
 
 构建并验证：
@@ -93,12 +94,17 @@ func gdx_state() -> Dictionary:
 然后查询：
 
 ```powershell
+gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 ```
 
 UI 流程优先使用 `input click-node`、`input activate` 和通过 `call invoke` 调用的项目级方法。只有坐标本身是测试对象时才使用坐标点击。移动端玩法如果监听触摸事件，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`，不要用鼠标点击替代。
 
-需要审阅动画节奏时，使用 `capture record --out .gdx/recording.avi --duration 3 --fps 60`。它通过 Godot Movie Writer 录制重新启动的场景，不会录制当前 daemon session。
+`state get --target /` 在未传 `method` 或 `property` 时默认调用 `gdx_state()`，返回结果会标明 state 来自 method 还是 property。
+
+Touch 命令要求 daemon runtime 提供 `touch_sequence`；如果报告 `daemon_runtime_outdated`，先运行 `project update --check`，再更新 managed runtime 并重启 daemon。不要把 touch 手势改写成鼠标事件来绕过旧 runtime。
+
+需要审阅动画节奏时，使用 `capture record --out .gdx/recording.avi --duration 3 --fps 60`。增加 `--input-sequence <json>` 可以在录制时回放 touch 事件。它通过 Godot Movie Writer 录制重新启动的场景，不会录制当前 daemon session。
 
 ## Verify specs
 

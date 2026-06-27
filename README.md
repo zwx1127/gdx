@@ -68,6 +68,7 @@ gdx --project C:\Path\To\GodotProject project inspect
 Update an already attached project after rebuilding or upgrading `gdx`:
 
 ```powershell
+gdx --project C:\Path\To\GodotProject project update --check
 gdx --project C:\Path\To\GodotProject project update
 gdx --project C:\Path\To\GodotProject daemon start --restart
 ```
@@ -97,7 +98,10 @@ Record a short AVI from a freshly launched scene to review animation timing:
 
 ```powershell
 gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
 ```
+
+`--input-sequence` replays the same touch sequence JSON used by `input sequence` in the fresh scene launched for Movie Writer recording.
 
 Run a multi-step verification spec:
 
@@ -153,7 +157,8 @@ Known limitations:
 - The CLI does not design or migrate games by itself.
 - `scene build` consumes a Godot-specific JSON spec; callers are responsible for generating the spec.
 - The daemon binds to `127.0.0.1` and is intended for trusted local automation.
-- `capture record` launches a fresh scene with Godot Movie Writer; it does not record the current daemon session.
+- `capture record` launches a fresh scene with Godot Movie Writer; it does not record the current daemon session, including when `--input-sequence` is used.
+- Touch gestures require a project daemon runtime that advertises `touch_sequence`; gdx reports `daemon_runtime_outdated` instead of downgrading touch input to mouse events.
 - Export requires Godot export presets and installed export templates.
 
 ## Contributing and support

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use serde_json::json;
 
+use super::session;
+
 use crate::constants::GDX_RUNTIME_CAPTURE_RUNNER_RES;
 use crate::context::{validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
@@ -47,6 +49,9 @@ pub struct RecordArgs {
 
     #[arg(long, default_value_t = 720)]
     pub height: u32,
+
+    #[arg(long)]
+    pub input_sequence: Option<PathBuf>,
 }
 
 pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json::Value> {
@@ -126,28 +131,44 @@ pub fn run_record(ctx: &AppContext, args: &RecordArgs) -> GdxResult<serde_json::
         ));
     }
     let frames = recording_frame_count(args.duration, args.fps)?;
+    let input_events = match &args.input_sequence {
+        Some(spec) => Some(session::read_touch_sequence(ctx, spec)?),
+        None => None,
+    };
+    let input_sequence = args.input_sequence.as_ref().map(|spec| ctx.abs_path(spec));
     let recording = ctx.abs_path(&args.out);
     validate_recording_out(&recording)?;
     ensure_parent_dir(&recording)?;
     let binary = ctx.locate_godot()?;
+    let mut command_args = vec![
+        "--path".to_string(),
+        godot_path_string(&project.root),
+        "--resolution".to_string(),
+        format!("{}x{}", args.width, args.height),
+        "--single-window".to_string(),
+        "--write-movie".to_string(),
+        godot_path_string(&recording),
+        "--fixed-fps".to_string(),
+        args.fps.to_string(),
+        "--quit-after".to_string(),
+        frames.to_string(),
+    ];
+    let mut envs = Vec::new();
+    if let Some(input_sequence) = &input_sequence {
+        command_args.push(GDX_RUNTIME_CAPTURE_RUNNER_RES.to_string());
+        envs.push(("GDX_TARGET_SCENE".to_string(), scene.clone()));
+        envs.push((
+            "GDX_INPUT_SEQUENCE".to_string(),
+            godot_path_string(input_sequence),
+        ));
+    } else {
+        command_args.push(scene.clone());
+    }
     let result = godot::run(GodotCommand {
         binary,
         project: project.root.clone(),
-        args: vec![
-            "--path".to_string(),
-            godot_path_string(&project.root),
-            "--resolution".to_string(),
-            format!("{}x{}", args.width, args.height),
-            "--single-window".to_string(),
-            "--write-movie".to_string(),
-            godot_path_string(&recording),
-            "--fixed-fps".to_string(),
-            args.fps.to_string(),
-            "--quit-after".to_string(),
-            frames.to_string(),
-            scene.clone(),
-        ],
-        envs: vec![],
+        args: command_args,
+        envs,
         timeout_secs: recording_timeout_secs(args.duration),
     })?;
     if result.status_code != 0 {
@@ -179,6 +200,8 @@ pub fn run_record(ctx: &AppContext, args: &RecordArgs) -> GdxResult<serde_json::
         "fps": args.fps,
         "frames": frames,
         "resolution": [args.width, args.height],
+        "input_sequence": input_sequence.as_ref().map(|path| godot_path_string(path)),
+        "input_events": input_events.as_ref().map(|events| events.len()),
         "artifacts": {
             "recording": godot_path_string(&recording),
             "stdout_log": godot_path_string(&result.stdout_log),

@@ -104,17 +104,25 @@ try {
     $Start = Invoke-Json $Bin @Common --project $Work daemon start --width 400 --height 300 --restart
     if ($Start.ok -ne $true) { throw "daemon start did not return ok JSON" }
     if ($Start.capabilities.status -ne "known") { throw "daemon start did not report known capabilities" }
+    if ($Start.runtime_status -ne "known") { throw "daemon start did not promote known runtime status" }
+    if ([int]$Start.pid -le 0) { throw "daemon start did not promote pid" }
+    if ([int]$Start.port -le 0) { throw "daemon start did not promote port" }
+    if ($Start.methods -notcontains "click_node") { throw "daemon start did not promote methods" }
     if ($Start.capabilities.methods -notcontains "click_node") { throw "daemon capabilities missing click_node" }
     if ($Start.capabilities.methods -notcontains "activate_node") { throw "daemon capabilities missing activate_node" }
 
     $Status = Invoke-Json $Bin --project $Work daemon status
     if ($Status.running -ne $true) { throw "Expected daemon status to be running" }
     if ($Status.capabilities.status -ne "known") { throw "daemon status did not report known capabilities" }
+    if ($Status.runtime_status -ne "known") { throw "daemon status did not promote known runtime status" }
+    if ($Status.scene -ne "res://scenes/main.tscn") { throw "daemon status did not promote scene" }
 
     $Tree = Invoke-Json $Bin --project $Work scene tree --include-script --include-groups --include-methods
     if ($Tree.tree.methods -notcontains "gdx_state") { throw "scene tree diagnostics missing gdx_state method" }
 
-    $Before = Invoke-Json $Bin --project $Work state get --target "/" --method gdx_state
+    $Before = Invoke-Json $Bin --project $Work state get --target "/"
+    if ($Before.result.source -ne "method") { throw "Expected state get to use method source" }
+    if ($Before.result.method -ne "gdx_state") { throw "Expected state get to default to gdx_state" }
     if ([int]$Before.result.state.clicks -ne 0) { throw "Expected zero clicks before input" }
 
     Invoke-Native $Bin --project $Work input click --position 120 80 --frames 2
@@ -136,13 +144,14 @@ try {
     Set-Content -LiteralPath $VerifySpec -Encoding ASCII -Value @'
 {
   "steps": [
-    { "state": { "target": "/", "method": "gdx_state" } },
+    { "state": { "target": "/" } },
     { "input_activate": { "target": "/ClickMe" } },
     { "state": { "target": "/", "method": "gdx_state" } }
   ]
 }
 '@
     $Verify = Invoke-Json $Bin --project $Work verify --spec $VerifySpec
+    if ($Verify.results[0].result.method -ne "gdx_state") { throw "Expected verify state step to default to gdx_state" }
     if ([int]$Verify.results[2].result.state.clicks -ne 4) { throw "Expected verify input step to activate button" }
 }
 finally {

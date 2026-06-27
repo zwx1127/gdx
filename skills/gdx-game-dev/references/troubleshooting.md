@@ -61,11 +61,12 @@ Daemon session data lives under `.gdx/daemon/session.json`. Prefer command clean
 If input or verify reports `daemon_runtime_outdated`, update the bundled runtime and restart the daemon:
 
 ```powershell
+gdx --project <project> project update --check
 gdx --project <project> project update
 gdx --project <project> daemon start --restart
 ```
 
-Use `daemon status` to inspect runtime capabilities when available.
+Use `daemon status` to inspect promoted `runtime_status`, `runtime_version`, `protocol_version`, `methods`, and `warnings`. Touch commands and verify touch steps require `touch_sequence` support and do not fall back to mouse events.
 
 ## Screenshot Missing or Blank
 
@@ -81,6 +82,7 @@ For UI regressions, prefer `verify --spec` plus project-level `gdx_*` methods, `
 ## Recording Missing or Empty
 
 - `capture record` writes AVI files through Godot Movie Writer and launches a fresh scene; it does not record an already running daemon session.
+- Use `capture record --input-sequence <json>` to replay touch input in that fresh scene while recording a gesture.
 - Use a `.avi` output path, keep `--duration` and `--fps` small while debugging, and inspect `artifacts.stderr_log` when Godot exits without a recording.
 
 ## Scene Build Fails

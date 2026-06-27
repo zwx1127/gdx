@@ -53,6 +53,7 @@ gdx --project C:\Path\To\Game project inspect
 After rebuilding or upgrading `gdx`, refresh an already attached project with:
 
 ```powershell
+gdx --project C:\Path\To\Game project update --check
 gdx --project C:\Path\To\Game project update
 ```
 
@@ -65,7 +66,7 @@ gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gd
 gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 ```
 
-If the project has a configured main scene, `capture run` and `capture record` can omit `--scene`. `capture record` launches the scene through Godot Movie Writer and writes an AVI recording.
+If the project has a configured main scene, `capture run` and `capture record` can omit `--scene`. `capture record` launches the scene through Godot Movie Writer and writes an AVI recording. Add `--input-sequence <json>` to replay touch events in that fresh scene while recording.
 
 ## Next steps
 

@@ -1,6 +1,6 @@
 extends Node
 
-const RUNTIME_VERSION := "0.1.0"
+const RUNTIME_VERSION := "0.1.1"
 const PROTOCOL_VERSION := 1
 const SUPPORTED_METHODS := [
     "ping",
@@ -394,15 +394,34 @@ func _rpc_get_state(peer: StreamPeerTCP, id: String, params: Dictionary) -> void
     if target == null:
         _send_error(peer, id, "target_not_found", "Target not found: %s" % target_path)
         return
-    var method := str(params.get("method", "gdx_state"))
+    var raw_method = params.get("method", "gdx_state")
+    var method := "gdx_state"
+    if raw_method != null and str(raw_method) != "":
+        method = str(raw_method)
     if target.has_method(method):
-        _send_result(peer, id, { "target": target_path, "state": _json_safe(target.call(method)) })
+        _send_result(peer, id, {
+            "target": target_path,
+            "source": "method",
+            "method": method,
+            "state": _json_safe(target.call(method)),
+        })
         return
-    var property := str(params.get("property", ""))
+    var raw_property = params.get("property", "")
+    var property := ""
+    if raw_property != null:
+        property = str(raw_property)
     if property != "":
-        _send_result(peer, id, { "target": target_path, "property": property, "state": _json_safe(target.get(property)) })
+        _send_result(peer, id, {
+            "target": target_path,
+            "source": "property",
+            "property": property,
+            "state": _json_safe(target.get(property)),
+        })
         return
-    _send_error(peer, id, "state_not_available", "Target has no state method and no property was requested")
+    _send_error(peer, id, "state_not_available", "Target has no state method and no property was requested", {
+        "target": target_path,
+        "method": method,
+    })
 
 func _tick_capture() -> void:
     if pending_capture.is_empty():

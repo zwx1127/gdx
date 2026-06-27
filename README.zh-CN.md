@@ -67,6 +67,7 @@ gdx --project C:\Path\To\GodotProject project inspect
 升级或重新构建 `gdx` 后，更新已接入项目：
 
 ```powershell
+gdx --project C:\Path\To\GodotProject project update --check
 gdx --project C:\Path\To\GodotProject project update
 gdx --project C:\Path\To\GodotProject daemon start --restart
 ```
@@ -96,7 +97,10 @@ gdx --project .\demo daemon stop
 
 ```powershell
 gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
 ```
+
+`--input-sequence` 会在 Movie Writer 启动的新场景里回放 `input sequence` 使用的同一种 touch sequence JSON。
 
 运行多步骤 verify spec：
 
@@ -152,6 +156,8 @@ agent-relay 项目链接：<https://github.com/zwx1127/agent-relay>
 - CLI 不会自行设计或迁移游戏。
 - `scene build` 接收 Godot 专用 JSON spec；调用方负责生成 spec。
 - daemon 绑定到 `127.0.0.1`，用于可信本地自动化。
+- `capture record` 会通过 Godot Movie Writer 启动新场景；即使使用 `--input-sequence`，它也不会录制当前 daemon session。
+- Touch 手势需要项目 daemon runtime 提供 `touch_sequence`；gdx 会报告 `daemon_runtime_outdated`，不会把 touch 降级成鼠标事件。
 - 导出依赖 Godot export preset 和已安装的 export templates。
 
 ## 贡献与支持

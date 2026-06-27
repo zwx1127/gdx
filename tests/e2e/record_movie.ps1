@@ -9,6 +9,7 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Bin = Join-Path $Root "target\debug\gdx.exe"
 $Work = Join-Path $env:TEMP ("gdx_record_" + [guid]::NewGuid().ToString("N"))
 $Movie = Join-Path $Work "recording.avi"
+$MovieInput = Join-Path $Work "recording-input.avi"
 
 function Invoke-Native {
     param(
@@ -25,6 +26,18 @@ function Invoke-Native {
     }
 }
 
+function Assert-Avi {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $MovieInfo = Get-Item -LiteralPath $Path
+    if ($MovieInfo.Length -le 0) { throw "Recording is empty: $Path" }
+
+    $Header = [System.IO.File]::ReadAllBytes($Path)[0..11]
+    $HeaderText = [System.Text.Encoding]::ASCII.GetString($Header)
+    if (!$HeaderText.StartsWith("RIFF") -or !$HeaderText.Contains("AVI ")) {
+        throw "Recording is not an AVI file: $Path"
+    }
+}
 if ([string]::IsNullOrWhiteSpace($Godot)) {
     throw "Set GDX_GODOT or pass -Godot with a Godot 4.x executable path."
 }
@@ -51,15 +64,24 @@ $ScriptText = @'
 extends Node2D
 
 var t: float = 0.0
+var marker := Vector2(190.0, 120.0)
 
 func _process(delta: float) -> void:
     t += delta
     queue_redraw()
 
+func _input(event: InputEvent) -> void:
+    if event is InputEventScreenTouch:
+        var touch := event as InputEventScreenTouch
+        marker = touch.position
+    elif event is InputEventScreenDrag:
+        var drag := event as InputEventScreenDrag
+        marker = drag.position
+
 func _draw() -> void:
     var x := 40.0 + sin(t * 4.0) * 24.0
     draw_rect(Rect2(x, 48.0, 96.0, 72.0), Color(0.1, 0.65, 1.0, 1.0))
-    draw_circle(Vector2(190.0, 120.0), 28.0 + sin(t * 5.0) * 8.0, Color(1.0, 0.55, 0.15, 1.0))
+    draw_circle(marker, 28.0 + sin(t * 5.0) * 8.0, Color(1.0, 0.55, 0.15, 1.0))
 '@
 [System.IO.File]::WriteAllText($ScriptPath, $ScriptText, [System.Text.UTF8Encoding]::new($false))
 
@@ -76,13 +98,29 @@ Invoke-Native $Bin @Common --project $Work capture record `
     --width 320 `
     --height 240
 
-$MovieInfo = Get-Item -LiteralPath $Movie
-if ($MovieInfo.Length -le 0) { throw "Recording is empty: $Movie" }
+Assert-Avi $Movie
 
-$Header = [System.IO.File]::ReadAllBytes($Movie)[0..11]
-$HeaderText = [System.Text.Encoding]::ASCII.GetString($Header)
-if (!$HeaderText.StartsWith("RIFF") -or !$HeaderText.Contains("AVI ")) {
-    throw "Recording is not an AVI file: $Movie"
-}
+$SequenceSpec = Join-Path $Work "touch-sequence.json"
+$SequenceJson = '{
+  "events": [
+    { "kind": "touch", "index": 0, "position": [80, 80], "pressed": true },
+    { "kind": "wait", "frames": 1 },
+    { "kind": "drag", "index": 0, "position": [180, 120], "relative": [100, 40] },
+    { "kind": "wait", "frames": 1 },
+    { "kind": "touch", "index": 0, "position": [180, 120], "pressed": false }
+  ]
+}'
+[System.IO.File]::WriteAllText($SequenceSpec, $SequenceJson, [System.Text.Encoding]::ASCII)
 
-Write-Host "GDX RECORD MOVIE E2E PASS: $Movie"
+Invoke-Native $Bin @Common --project $Work capture record `
+    --scene "res://scenes/main.tscn" `
+    --out $MovieInput `
+    --duration 1 `
+    --fps 12 `
+    --width 320 `
+    --height 240 `
+    --input-sequence $SequenceSpec
+
+Assert-Avi $MovieInput
+
+Write-Host "GDX RECORD MOVIE E2E PASS: $MovieInput"

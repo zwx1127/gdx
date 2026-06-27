@@ -81,6 +81,8 @@ gdx --project .\demo node set --node /Status --property text --value "Ready"
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
 gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
+gdx --project .\demo input send --mouse-button 1 --position 120 240 --pressed false
+gdx --project .\demo input send --mouse-button 1 --position 120 240 --release
 gdx --project .\demo input click --position 120 240
 gdx --project .\demo input click-node --target /StartButton
 gdx --project .\demo input touch --position 120 240 --pressed true
@@ -91,18 +93,21 @@ gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-dis
 gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
+gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
 gdx --project .\demo daemon stop
 ```
 
-`input click` 使用鼠标事件。移动端玩法如果监听 `InputEventScreenTouch` 或 `InputEventScreenDrag`，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`。
+`input send --pressed` 接受 `true` 或 `false`；`--release` 是 `--pressed false` 的清晰别名。`input click` 使用鼠标事件。移动端玩法如果监听 `InputEventScreenTouch` 或 `InputEventScreenDrag`，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`。Touch 命令要求 daemon runtime 支持 `touch_sequence`；缺失时会报告 `daemon_runtime_outdated`，不会降级成鼠标事件。
 
 `input sequence` 读取 `{ "events": [...] }` JSON。事件可以是 `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`、`{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }` 或 `{ "kind": "wait", "frames": 2 }`。
 
-未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。`daemon start` 和 `daemon status` 会在已安装 runtime 支持时返回 daemon runtime capabilities；`status: "unknown"` 表示项目内 runtime 早于 capabilities RPC。
+未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。`daemon start` 和 `daemon status` 会在顶层稳定返回 `pid`、`port`、`scene`、`runtime_status`、`runtime_version`、`protocol_version`、`methods` 和 `warnings`。`runtime_status: "unknown"` 表示项目内 runtime 早于 capabilities RPC；`runtime_status: "outdated"` 表示 runtime 已知但缺少 `touch_sequence` 等能力。
 
-升级或重新构建 `gdx` 后，运行 `gdx --project .\demo project update` 并重启 daemon，让运行中的项目使用新的内置 runtime。
+升级或重新构建 `gdx` 后，先运行 `gdx --project .\demo project update --check` 查看 managed addon 变化，再运行 `gdx --project .\demo project update` 并重启 daemon，让运行中的项目使用新的内置 runtime。
+
+`state get --target /` 不会发送空的 `method` 或 `property`，runtime 会在目标实现时默认调用 `gdx_state()`。返回结果包含 `target`、`source`、`method` 或 `property`、`state`，即使 `state` 为 null 也能看出实际查询了什么。
 
 `scene tree --include-methods` 会列出匹配 `--method-prefix` 的可调用方法，默认前缀是 `gdx_`。这些字段只用于诊断；gdx 不会自动选择替代 target。
 
@@ -112,8 +117,9 @@ gdx --project .\demo daemon stop
 gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
 gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export\game.exe
 ```
 
-`capture run` 启动一次性截图 runner。`capture daemon` 截取当前 daemon session。`capture record` 使用 Godot Movie Writer 启动一个新的场景实例并写出 AVI，不会录制当前 daemon session。导出需要 `export_presets.cfg` 和已安装的 Godot export templates。
+`capture run` 启动一次性截图 runner。`capture daemon` 截取当前 daemon session。`capture record` 使用 Godot Movie Writer 启动一个新的场景实例并写出 AVI，不会录制当前 daemon session。`capture record --input-sequence <json>` 会在这个 fresh scene 里回放 touch 事件，方便验收手势动画过程。导出需要 `export_presets.cfg` 和已安装的 Godot export templates。

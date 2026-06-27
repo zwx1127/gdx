@@ -487,6 +487,109 @@ mod tests {
     }
 
     #[test]
+    fn parses_input_send_pressed_values_and_release_alias() {
+        let pressed_false = parses(&[
+            "gdx",
+            "--project",
+            "demo",
+            "input",
+            "send",
+            "--mouse-button",
+            "1",
+            "--pressed",
+            "false",
+        ]);
+        match pressed_false.command {
+            Commands::Input(command) => match command.command {
+                InputSubcommand::Send(args) => {
+                    assert!(!args.pressed);
+                    assert!(!args.release);
+                }
+                _ => panic!("expected input send"),
+            },
+            _ => panic!("expected input command"),
+        }
+
+        let pressed_true = parses(&[
+            "gdx",
+            "--project",
+            "demo",
+            "input",
+            "send",
+            "--mouse-button",
+            "1",
+            "--pressed",
+            "true",
+        ]);
+        match pressed_true.command {
+            Commands::Input(command) => match command.command {
+                InputSubcommand::Send(args) => {
+                    assert!(args.pressed);
+                    assert!(!args.release);
+                }
+                _ => panic!("expected input send"),
+            },
+            _ => panic!("expected input command"),
+        }
+
+        let pressed_bare = parses(&[
+            "gdx",
+            "--project",
+            "demo",
+            "input",
+            "send",
+            "--mouse-button",
+            "1",
+            "--pressed",
+        ]);
+        match pressed_bare.command {
+            Commands::Input(command) => match command.command {
+                InputSubcommand::Send(args) => {
+                    assert!(args.pressed);
+                    assert!(!args.release);
+                }
+                _ => panic!("expected input send"),
+            },
+            _ => panic!("expected input command"),
+        }
+
+        let release = parses(&[
+            "gdx",
+            "--project",
+            "demo",
+            "input",
+            "send",
+            "--mouse-button",
+            "1",
+            "--release",
+        ]);
+        match release.command {
+            Commands::Input(command) => match command.command {
+                InputSubcommand::Send(args) => {
+                    assert!(args.pressed);
+                    assert!(args.release);
+                }
+                _ => panic!("expected input send"),
+            },
+            _ => panic!("expected input command"),
+        }
+
+        let err = Cli::try_parse_from([
+            "gdx",
+            "--project",
+            "demo",
+            "input",
+            "send",
+            "--mouse-button",
+            "1",
+            "--pressed",
+            "true",
+            "--release",
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+    #[test]
     fn rejects_removed_v1_shapes() {
         for args in [
             vec![

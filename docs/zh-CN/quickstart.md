@@ -53,6 +53,7 @@ gdx --project C:\Path\To\Game project inspect
 升级或重新构建 `gdx` 后，用下面的命令刷新已接入项目：
 
 ```powershell
+gdx --project C:\Path\To\Game project update --check
 gdx --project C:\Path\To\Game project update
 ```
 
@@ -65,7 +66,7 @@ gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gd
 gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
 ```
 
-如果项目已经配置 main scene，`capture run` 和 `capture record` 都可以省略 `--scene`。`capture record` 会通过 Godot Movie Writer 启动场景并写出 AVI 录制文件。
+如果项目已经配置 main scene，`capture run` 和 `capture record` 都可以省略 `--scene`。`capture record` 会通过 Godot Movie Writer 启动场景并写出 AVI 录制文件。增加 `--input-sequence <json>` 可以在这个 fresh scene 里回放 touch 事件并录制手势过程。
 
 ## 下一步
 
