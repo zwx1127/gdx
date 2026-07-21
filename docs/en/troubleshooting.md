@@ -10,7 +10,15 @@ Run:
 gdx doctor
 ```
 
-If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`. If Godot is not found, set `GDX_GODOT` or pass `--godot`.
+If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`. If Godot is not found, set `GDX_GODOT` or pass `--godot`. For mixed projects, configure `GDX_GODOT_STANDARD` and `GDX_GODOT_DOTNET`; explicit `--godot` always wins.
+
+`gdx doctor` identifies GDScript/C# projects, the selected standard/.NET Godot build, and installed .NET SDKs. A GDScript-only project using .NET Godot without an SDK is a warning. A C# project without a .NET-enabled Godot build or a .NET 8+ SDK fails before project execution.
+
+## A long command appears stuck
+
+Use `--progress ndjson` and parse stderr one line at a time. A command emits `command_started` immediately and a `heartbeat` at least every five seconds. Godot child events include the PID, subject, timeout, and log paths. On timeout or Ctrl+C, gdx keeps those logs and terminates the one-shot process tree; cancellation exits with code 130.
+
+For `script check-all`, reduce concurrency with `--jobs 1` or `--jobs 2`, narrow the tree with repeated `--exclude res://...`, and adjust `--script-timeout-secs` separately from the global `--timeout-secs`.
 
 ## Godot crashes in native code
 
@@ -63,6 +71,20 @@ gdx --project .\demo daemon stop --force
 ```
 
 Daemon session data lives under `.gdx/daemon/session.json`. Prefer command cleanup over deleting files manually.
+
+If `daemon start` reports `project_unhealthy`, inspect `health.first_error` and the attached daemon logs. Parsing, resource, and scene-load errors block startup and the newly started daemon is stopped automatically. Missing .NET SDK messages from a GDScript-only project are treated as environment warnings. Use `--no-health-check` only for deliberate diagnostics; it returns `project_healthy: null`.
+
+## Run history consumes disk space
+
+Preview before deleting:
+
+```powershell
+gdx --project .\demo runs list
+gdx --project .\demo runs prune
+gdx --project .\demo runs prune --apply
+```
+
+The first applied prune enrolls legacy `.gdx/runs` directories into automatic retention. Running records and daemon state are protected. Use the returned `candidate_count`, `candidate_bytes`, `deleted`, and `freed_bytes` fields instead of deleting run directories manually.
 
 ## Daemon runtime is older than the CLI
 

@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use clap::{ArgAction, ArgGroup, Args};
 use serde::{Deserialize, Serialize};
@@ -7,6 +9,7 @@ use uuid::Uuid;
 
 use crate::context::{read_json_file, validate_non_empty, validate_res_path, AppContext};
 use crate::daemon::{self, SpawnDaemon};
+use crate::diagnostics::{summarize_logs, LogRecord, LogSummary, WarningMode};
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_parent_dir, godot_path_string, read_main_scene};
 
@@ -26,10 +29,28 @@ pub struct StartArgs {
 
     #[arg(long)]
     pub restart: bool,
+
+    #[arg(long)]
+    pub no_health_check: bool,
+
+    #[arg(long, default_value_t = 5)]
+    pub health_timeout_secs: u64,
 }
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {}
+
+#[derive(Debug, Clone, Serialize)]
+struct DaemonHealth {
+    rpc_ready: bool,
+    scene_loaded: Option<bool>,
+    project_healthy: Option<bool>,
+    scene_root: Option<String>,
+    stderr_error_count: u64,
+    first_error: Option<LogRecord>,
+    log_summary: LogSummary,
+    health_check_duration_ms: u128,
+}
 
 #[derive(Debug, Args)]
 pub struct StopArgs {
@@ -206,6 +227,11 @@ pub struct ActivateArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("call_arguments")
+        .multiple(false)
+        .args(["args_json", "args_file"])
+))]
 pub struct CallArgs {
     #[arg(long)]
     pub target: String,
@@ -213,8 +239,11 @@ pub struct CallArgs {
     #[arg(long)]
     pub method: String,
 
-    #[arg(long, default_value = "[]")]
-    pub args_json: String,
+    #[arg(long)]
+    pub args_json: Option<String>,
+
+    #[arg(long)]
+    pub args_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -239,10 +268,28 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
             "Width and height must be greater than zero",
         ));
     }
+    if args.health_timeout_secs == 0 {
+        return Err(GdxError::user(
+            "invalid_health_timeout",
+            "--health-timeout-secs must be greater than zero",
+        ));
+    }
+    let project_has_csharp = crate::godot::project_has_csharp(&project.root);
     if let Ok(existing) = daemon::read_session(&project.root) {
         if daemon::ping_session(&existing) {
             let capabilities = capabilities_for_status(&existing);
             if !args.restart {
+                let health = health_for_start(
+                    &existing,
+                    &project.root,
+                    args.no_health_check,
+                    args.health_timeout_secs,
+                    project_has_csharp,
+                );
+                if health.project_healthy == Some(false) {
+                    stop_unhealthy_daemon(&project.root, &existing);
+                    return Err(unhealthy_error(&existing, &health));
+                }
                 return Ok(daemon_session_response(
                     "daemon.start",
                     &project.root,
@@ -250,6 +297,7 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
                     Some(true),
                     Some(&existing),
                     capabilities,
+                    health,
                 ));
             }
             let _ = daemon::rpc_session(&existing, "shutdown", json!({}), 3);
@@ -275,8 +323,19 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
         width: args.width,
         height: args.height,
     })?;
-    daemon::write_session(&project.root, &session)?;
     let capabilities = capabilities_for_status(&session);
+    let health = health_for_start(
+        &session,
+        &project.root,
+        args.no_health_check,
+        args.health_timeout_secs,
+        project_has_csharp,
+    );
+    if health.project_healthy == Some(false) {
+        stop_unhealthy_daemon(&project.root, &session);
+        return Err(unhealthy_error(&session, &health));
+    }
+    daemon::write_session(&project.root, &session)?;
 
     Ok(daemon_session_response(
         "daemon.start",
@@ -285,6 +344,7 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
         Some(false),
         Some(&session),
         capabilities,
+        health,
     ))
 }
 
@@ -306,11 +366,40 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
     match daemon::read_session(&project.root) {
         Ok(session) => {
             let running = daemon::ping_session(&session);
+            if !running {
+                daemon::remove_session(&project.root);
+                let mut response = daemon_session_response(
+                    "daemon.status",
+                    &project.root,
+                    false,
+                    None,
+                    None,
+                    Value::Null,
+                    DaemonHealth {
+                        rpc_ready: false,
+                        scene_loaded: Some(false),
+                        project_healthy: Some(false),
+                        scene_root: None,
+                        stderr_error_count: 0,
+                        first_error: None,
+                        log_summary: LogSummary::default(),
+                        health_check_duration_ms: 0,
+                    },
+                );
+                response["stale_session_removed"] = json!(true);
+                return Ok(response);
+            }
             let capabilities = if running {
                 capabilities_for_status(&session)
             } else {
                 serde_json::Value::Null
             };
+            let health = check_daemon_health(
+                &session,
+                &project.root,
+                2,
+                crate::godot::project_has_csharp(&project.root),
+            );
             Ok(daemon_session_response(
                 "daemon.status",
                 &project.root,
@@ -318,6 +407,7 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
                 None,
                 Some(&session),
                 capabilities,
+                health,
             ))
         }
         Err(_) => Ok(daemon_session_response(
@@ -327,6 +417,16 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
             None,
             None,
             Value::Null,
+            DaemonHealth {
+                rpc_ready: false,
+                scene_loaded: None,
+                project_healthy: None,
+                scene_root: None,
+                stderr_error_count: 0,
+                first_error: None,
+                log_summary: LogSummary::default(),
+                health_check_duration_ms: 0,
+            },
         )),
     }
 }
@@ -338,6 +438,7 @@ fn daemon_session_response(
     already_running: Option<bool>,
     session: Option<&daemon::DaemonSession>,
     capabilities: Value,
+    health: DaemonHealth,
 ) -> Value {
     let runtime_status = runtime_status_for(&capabilities);
     let runtime_version = capabilities
@@ -368,11 +469,112 @@ fn daemon_session_response(
         "warnings": warnings,
         "session": session,
         "capabilities": capabilities
+        ,"health": health
     });
     if let Some(already_running) = already_running {
         response["already_running"] = json!(already_running);
     }
     response
+}
+
+fn health_for_start(
+    session: &daemon::DaemonSession,
+    project_root: &Path,
+    skip: bool,
+    timeout_secs: u64,
+    csharp_project: bool,
+) -> DaemonHealth {
+    if skip {
+        return DaemonHealth {
+            rpc_ready: true,
+            scene_loaded: None,
+            project_healthy: None,
+            scene_root: None,
+            stderr_error_count: 0,
+            first_error: None,
+            log_summary: LogSummary::default(),
+            health_check_duration_ms: 0,
+        };
+    }
+    check_daemon_health(session, project_root, timeout_secs, csharp_project)
+}
+
+fn check_daemon_health(
+    session: &daemon::DaemonSession,
+    _project_root: &Path,
+    timeout_secs: u64,
+    csharp_project: bool,
+) -> DaemonHealth {
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(timeout_secs);
+    let capabilities = daemon::rpc_session(session, "capabilities", json!({}), timeout_secs);
+    let tree = if Instant::now() < deadline {
+        let remaining = deadline
+            .saturating_duration_since(Instant::now())
+            .as_secs()
+            .max(1);
+        daemon::rpc_session(session, "scene_tree", json!({}), remaining)
+    } else {
+        Err(GdxError::timeout(
+            "Daemon capabilities health check timed out",
+        ))
+    };
+    // Allow deferred calls queued by scene _ready() to report startup errors.
+    thread::sleep(Duration::from_millis(250));
+    let summary = summarize_logs(
+        Path::new(&session.stdout_log),
+        Path::new(&session.stderr_log),
+    );
+    let hard_error = summary.first_hard_error(csharp_project).cloned();
+    let scene_root = tree.as_ref().ok().and_then(|value| {
+        value
+            .get("path")
+            .or_else(|| value.get("name"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    let rpc_ready = capabilities.is_ok() && tree.is_ok();
+    let scene_loaded = rpc_ready && scene_root.is_some();
+    DaemonHealth {
+        rpc_ready,
+        scene_loaded: Some(scene_loaded),
+        project_healthy: Some(scene_loaded && hard_error.is_none()),
+        scene_root,
+        stderr_error_count: summary.errors,
+        first_error: hard_error,
+        log_summary: summary.filtered(WarningMode::Summary),
+        health_check_duration_ms: started.elapsed().as_millis(),
+    }
+}
+
+fn unhealthy_error(session: &daemon::DaemonSession, health: &DaemonHealth) -> GdxError {
+    let (message, suggestion) = if !health.rpc_ready {
+        (
+            "Daemon started, but required health-check RPCs are unavailable",
+            daemon::RUNTIME_UPDATE_SUGGESTION,
+        )
+    } else {
+        (
+            "Daemon RPC became ready, but the project failed its startup health check",
+            "Fix the first project error, then restart the daemon.",
+        )
+    };
+    GdxError::tool("project_unhealthy", message)
+        .with_stage("daemon_health")
+        .with_child_pid(session.pid)
+        .with_details(json!({ "health": health }))
+        .with_artifact("stdout_log", session.stdout_log.clone())
+        .with_artifact("stderr_log", session.stderr_log.clone())
+        .with_suggestion(suggestion)
+}
+
+fn stop_unhealthy_daemon(project_root: &Path, session: &daemon::DaemonSession) {
+    let _ = daemon::rpc_session(session, "shutdown", json!({}), 2);
+    thread::sleep(Duration::from_millis(250));
+    if daemon::ping_session(session) {
+        let _ = daemon::kill_process(session.pid, true);
+    }
+    daemon::remove_session(project_root);
 }
 
 fn runtime_status_for(capabilities: &Value) -> &'static str {
@@ -503,6 +705,16 @@ pub fn run_stop(ctx: &AppContext, args: &StopArgs) -> GdxResult<serde_json::Valu
             }));
         }
     };
+    if !daemon::ping_session(&session) {
+        daemon::remove_session(&project.root);
+        return Ok(json!({
+            "ok": true,
+            "command": "daemon.stop",
+            "project": godot_path_string(&project.root),
+            "killed": false,
+            "reason": "stale_session_removed"
+        }));
+    }
     let shutdown_ok = daemon::rpc_session(&session, "shutdown", json!({}), 3).is_ok();
     if !shutdown_ok || args.force {
         let _ = daemon::kill_process(session.pid, args.force);
@@ -948,6 +1160,7 @@ pub fn run_activate(ctx: &AppContext, args: &ActivateArgs) -> GdxResult<serde_js
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -997,6 +1210,16 @@ mod tests {
             None,
             Some(&session),
             capabilities,
+            DaemonHealth {
+                rpc_ready: true,
+                scene_loaded: Some(true),
+                project_healthy: Some(true),
+                scene_root: Some("/".to_string()),
+                stderr_error_count: 0,
+                first_error: None,
+                log_summary: LogSummary::default(),
+                health_check_duration_ms: 1,
+            },
         );
 
         assert_eq!(value["pid"], 123);
@@ -1020,12 +1243,13 @@ mod tests {
 
         assert_eq!(err.error, "daemon_runtime_outdated");
         assert!(err
+            .context
             .suggestion
             .as_deref()
             .unwrap()
             .contains("project update --check"));
         assert_eq!(
-            err.details.unwrap()["requested_rpc_method"],
+            err.context.details.unwrap()["requested_rpc_method"],
             "touch_sequence"
         );
     }
@@ -1107,16 +1331,22 @@ mod tests {
 pub fn run_call(ctx: &AppContext, args: &CallArgs) -> GdxResult<serde_json::Value> {
     validate_non_empty("target", &args.target)?;
     validate_non_empty("method", &args.method)?;
-    let call_args: serde_json::Value = serde_json::from_str(&args.args_json).map_err(|err| {
-        GdxError::user(
-            "invalid_args_json",
-            format!("--args-json must be valid JSON array: {err}"),
-        )
-    })?;
+    let call_args: serde_json::Value = if let Some(path) = &args.args_file {
+        read_json_file(ctx, path)?
+    } else if let Some(text) = &args.args_json {
+        serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|err| {
+            GdxError::user(
+                "invalid_args_json",
+                format!("--args-json must be valid JSON array: {err}"),
+            )
+        })?
+    } else {
+        json!([])
+    };
     if !call_args.is_array() {
         return Err(GdxError::user(
             "invalid_args_json",
-            "--args-json must be a JSON array",
+            "Call arguments must be a JSON array",
         ));
     }
     let project = ctx.project()?;

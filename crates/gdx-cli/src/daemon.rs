@@ -43,7 +43,7 @@ pub fn read_session(project: &Path) -> GdxResult<DaemonSession> {
             format!("Cannot read daemon session {}: {err}", path.display()),
         )
     })?;
-    serde_json::from_str(&text)
+    serde_json::from_str(text.trim_start_matches('\u{feff}'))
         .map_err(|err| GdxError::tool("invalid_session", format!("Invalid session file: {err}")))
 }
 
@@ -119,12 +119,13 @@ pub fn rpc_session(
             "Daemon returned an empty response",
         ));
     }
-    let response: Value = serde_json::from_str(line.trim()).map_err(|err| {
-        GdxError::tool(
-            "daemon_invalid_response",
-            format!("Daemon returned invalid JSON: {err}"),
-        )
-    })?;
+    let response: Value = serde_json::from_str(line.trim().trim_start_matches('\u{feff}'))
+        .map_err(|err| {
+            GdxError::tool(
+                "daemon_invalid_response",
+                format!("Daemon returned invalid JSON: {err}"),
+            )
+        })?;
     if response.get("ok").and_then(Value::as_bool) == Some(true) {
         Ok(response.get("result").cloned().unwrap_or(Value::Null))
     } else {
@@ -150,7 +151,7 @@ fn enrich_rpc_error(mut error: GdxError, project: &Path, method: &str) -> GdxErr
         return error;
     }
 
-    let details = match error.details.take() {
+    let details = match error.context.details.take() {
         Some(mut existing) if existing.is_object() => {
             existing["original_error"] = json!("unknown_method");
             existing["requested_rpc_method"] = json!(method);
@@ -261,6 +262,17 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
 
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(30) {
+        if crate::process::cancellation_requested() {
+            let _ = kill_process(child.id(), true);
+            let _ = child.wait();
+            let error = GdxError::cancelled("Daemon startup was cancelled")
+                .with_stage("daemon_start")
+                .with_child_pid(session.pid)
+                .with_elapsed_ms(started.elapsed().as_millis())
+                .with_artifact("stdout_log", session.stdout_log.clone())
+                .with_artifact("stderr_log", session.stderr_log.clone());
+            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+        }
         if let Some(status) = child.try_wait().map_err(|err| {
             GdxError::tool("wait_failed", format!("Cannot check daemon status: {err}"))
         })? {
@@ -278,7 +290,7 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
         thread::sleep(Duration::from_millis(250));
     }
 
-    let _ = child.kill();
+    let _ = kill_process(child.id(), true);
     let _ = child.wait();
     let error = GdxError::timeout("Timed out waiting for daemon to start")
         .with_artifact("stdout_log", session.stdout_log)
@@ -347,6 +359,7 @@ pub fn kill_process(pid: u32, force: bool) -> GdxResult<()> {
     if cfg!(windows) {
         let mut command = Command::new("taskkill");
         command.arg("/PID").arg(pid.to_string());
+        command.arg("/T");
         if force {
             command.arg("/F");
         }
@@ -397,13 +410,35 @@ mod tests {
         assert_eq!(mapped.error, "daemon_runtime_outdated");
         assert!(mapped.message.contains("activate_node"));
         assert!(mapped
+            .context
             .suggestion
             .as_deref()
             .unwrap()
             .contains("project update --check"));
         assert_eq!(
-            mapped.details.unwrap()["requested_rpc_method"],
+            mapped.context.details.unwrap()["requested_rpc_method"],
             "activate_node"
         );
+    }
+
+    #[test]
+    fn reads_bom_prefixed_session_json() {
+        let project = std::env::temp_dir().join(format!(
+            "gdx_daemon_session_{}_{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let path = session_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "\u{feff}{\"pid\":1,\"port\":2,\"token\":\"t\",\"scene\":\"res://main.tscn\",\"stdout_log\":\"out\",\"stderr_log\":\"err\",\"started_at\":3}",
+        )
+        .unwrap();
+
+        let session = read_session(&project).unwrap();
+
+        assert_eq!(session.port, 2);
+        let _ = fs::remove_dir_all(project);
     }
 }

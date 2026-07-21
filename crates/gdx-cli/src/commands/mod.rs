@@ -7,6 +7,7 @@ pub(crate) mod init;
 pub(crate) mod play;
 pub(crate) mod project_cmd;
 pub(crate) mod resource;
+pub(crate) mod runs;
 pub(crate) mod scene;
 pub(crate) mod session;
 pub(crate) mod test_cmd;
@@ -17,16 +18,21 @@ use serde_json::Value;
 use crate::cli::{
     AssetSubcommand, AutoloadSubcommand, CallSubcommand, CaptureSubcommand, Cli, Commands,
     DaemonSubcommand, ExportSubcommand, InputMapSubcommand, InputSubcommand, NodeSubcommand,
-    ProjectSubcommand, ResourceSubcommand, SceneSubcommand, ScriptSubcommand, SettingSubcommand,
-    StateSubcommand, TestSubcommand,
+    ProjectSubcommand, ResourceSubcommand, RunsSubcommand, SceneSubcommand, ScriptSubcommand,
+    SettingSubcommand, StateSubcommand, TestSubcommand,
 };
 use crate::context::AppContext;
 use crate::error::GdxResult;
+use crate::progress::ProgressReporter;
 
-pub fn run(cli: &Cli) -> GdxResult<Value> {
-    let ctx = AppContext::new(cli.godot.clone(), cli.project.clone())?;
-    match &cli.command {
+pub fn run(cli: &Cli, progress: ProgressReporter) -> GdxResult<Value> {
+    let ctx = AppContext::from_cli(cli, progress)?;
+    let mut result = match &cli.command {
         Commands::Doctor => env::run(&ctx),
+        Commands::Runs(command) => match &command.command {
+            RunsSubcommand::List(args) => runs::run_list(&ctx, args),
+            RunsSubcommand::Prune(args) => runs::run_prune(&ctx, args),
+        },
         Commands::Project(command) => match &command.command {
             ProjectSubcommand::Create(args) => init::run_create(&ctx, args),
             ProjectSubcommand::Install(args) => project_cmd::run_install(&ctx, args),
@@ -109,7 +115,42 @@ pub fn run(cli: &Cli) -> GdxResult<Value> {
             ExportSubcommand::Build(args) => export::run_build(&ctx, args),
         },
         Commands::Verify(args) => verify::run(&ctx, args),
+    };
+    let cleanup = ctx.finalize_runs();
+    match &mut result {
+        Ok(value) if value.is_object() => {
+            value["cleanup"] = cleanup;
+            value["log_summary"] = ctx.log_summary();
+        }
+        Err(error) => {
+            let mut log_summary = ctx.log_summary();
+            let aggregate_is_empty = log_summary
+                .get("errors")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                == 0
+                && log_summary
+                    .get("warnings")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    == 0;
+            if aggregate_is_empty {
+                if let Some(summary) = error
+                    .context
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("diagnostics"))
+                    .and_then(|diagnostics| diagnostics.get("log_summary"))
+                {
+                    log_summary = summary.clone();
+                }
+            }
+            error.insert_detail("cleanup", cleanup);
+            error.insert_detail("log_summary", log_summary);
+        }
+        _ => {}
     }
+    result
 }
 
 #[cfg(test)]
@@ -483,6 +524,85 @@ mod tests {
                 cli.command,
                 Commands::Daemon(_) | Commands::Input(_) | Commands::Call(_) | Commands::State(_)
             ));
+        }
+    }
+
+    #[test]
+    fn parses_reliability_options_and_file_arguments() {
+        let cli = parses(&[
+            "gdx",
+            "--project",
+            "demo",
+            "--progress",
+            "ndjson",
+            "--warnings",
+            "error",
+            "--godot-standard",
+            "standard.exe",
+            "script",
+            "check-all",
+            "--jobs",
+            "4",
+            "--script-timeout-secs",
+            "30",
+            "--timeout-secs",
+            "120",
+            "--exclude",
+            "res://vendor",
+            "--exclude",
+            "res://generated",
+        ]);
+        match cli.command {
+            Commands::Script(command) => match command.command {
+                ScriptSubcommand::CheckAll(args) => {
+                    assert_eq!(args.jobs, Some(4));
+                    assert_eq!(args.excludes.len(), 2);
+                }
+                _ => panic!("expected script check-all"),
+            },
+            _ => panic!("expected script command"),
+        }
+
+        for args in [
+            vec!["gdx", "--project", "demo", "runs", "prune", "--apply"],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "daemon",
+                "start",
+                "--no-health-check",
+                "--health-timeout-secs",
+                "8",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "call",
+                "invoke",
+                "--target",
+                "/",
+                "--method",
+                "start",
+                "--args-file",
+                "args.json",
+            ],
+            vec![
+                "gdx",
+                "--project",
+                "demo",
+                "node",
+                "set",
+                "--node",
+                "/Title",
+                "--property",
+                "text",
+                "--value-file",
+                "value.json",
+            ],
+        ] {
+            parses(&args);
         }
     }
 

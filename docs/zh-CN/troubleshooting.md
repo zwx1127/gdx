@@ -10,7 +10,15 @@
 gdx doctor
 ```
 
-如果 `gdx` 不在 `PATH`，在 `cargo build --workspace` 后使用仓库二进制。如果找不到 Godot，设置 `GDX_GODOT` 或传入 `--godot`。
+如果 `gdx` 不在 `PATH`，在 `cargo build --workspace` 后使用仓库二进制。如果找不到 Godot，设置 `GDX_GODOT` 或传入 `--godot`。混合项目环境可分别配置 `GDX_GODOT_STANDARD` 和 `GDX_GODOT_DOTNET`；显式 `--godot` 始终优先。
+
+`gdx doctor` 会识别 GDScript/C# 项目、选中的标准/.NET Godot 及已安装 SDK。纯 GDScript 项目使用 .NET Godot 且缺少 SDK 时只返回 warning；C# 项目缺少 .NET Godot 或 .NET 8+ SDK 时会在运行项目前失败。
+
+## 长命令看起来卡住
+
+使用 `--progress ndjson` 并逐行解析 stderr。命令会立即发出 `command_started`，之后至少每 5 秒发出一次 `heartbeat`。Godot 子进程事件包含 PID、subject、timeout 和日志路径。超时或 Ctrl+C 后，gdx 会保留日志并终止一次性进程树；取消的退出码是 130。
+
+对于 `script check-all`，可用 `--jobs 1` 或 `--jobs 2` 降低并行度，用可重复的 `--exclude res://...` 缩小范围，并分别调整单脚本 `--script-timeout-secs` 与全局 `--timeout-secs`。
 
 ## Godot 原生崩溃
 
@@ -63,6 +71,20 @@ gdx --project .\demo daemon stop --force
 ```
 
 Daemon session 数据位于 `.gdx/daemon/session.json`。优先使用命令清理，不要手动删除文件。
+
+如果 `daemon start` 报告 `project_unhealthy`，先查看 `health.first_error` 和附带的 daemon 日志。解析、资源和场景加载错误会阻断启动，新启动的 daemon 会被自动停止；纯 GDScript 项目中的缺 SDK 信息只视为环境 warning。`--no-health-check` 仅用于明确的诊断场景，并会返回 `project_healthy: null`。
+
+## 运行历史占用磁盘
+
+删除前先预览：
+
+```powershell
+gdx --project .\demo runs list
+gdx --project .\demo runs prune
+gdx --project .\demo runs prune --apply
+```
+
+第一次实际 prune 会把旧 `.gdx/runs` 目录纳入后续自动保留策略。运行中的记录和 daemon 状态受保护。应依据返回的 `candidate_count`、`candidate_bytes`、`deleted` 和 `freed_bytes` 字段判断结果，不要手动删除运行目录。
 
 ## Daemon runtime 旧于 CLI
 

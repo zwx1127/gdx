@@ -1,16 +1,22 @@
 # gdx CLI 参考
 
-所有 `gdx` 命令输出都是 JSON。成功写到 stdout，失败以 JSON 写到 stderr，并可能包含 Godot 日志产物和诊断信息。
+所有 `gdx` 命令结果都是 JSON。stdout 只包含一个最终成功对象；进度和失败写到 stderr。非交互环境中的进度采用逐行 NDJSON，失败时 stderr 最后一行仍是现有 `{ "ok": false, ... }` 错误对象。
 
 ## 全局选项
 
 ```powershell
-gdx --godot <path-to-godot> --project <project-dir> <command>
+gdx --project <project-dir> --progress auto --warnings summary <command>
 ```
 
 - `--godot <path>` 覆盖 Godot 二进制发现结果。
+- `--godot-standard <path>` / `GDX_GODOT_STANDARD` 配置标准版 Godot。
+- `--godot-dotnet <path>` / `GDX_GODOT_DOTNET` 配置支持 .NET 的 Godot。
 - `--project <dir>` 指定已有 Godot 项目。
 - `GDX_GODOT` 是 `--godot` 的环境变量替代方式。
+- `--progress auto|stderr|ndjson|off` 默认在 TTY 输出人类可读进度，其他环境输出 NDJSON；长命令至少每 5 秒发出一次心跳。
+- `--warnings all|summary|error` 控制结果中返回的诊断分组；完整日志始终保留。
+
+Godot 选择顺序为：显式 `--godot`、与项目类型匹配的标准/.NET 配置、`GDX_GODOT`、`PATH`。
 
 凡是操作项目的命令都使用 `--project`。
 
@@ -55,7 +61,7 @@ gdx --project .\demo asset inspect --path res://assets/player.png
 gdx --project .\demo script create --path res://scripts/main.gd --extends Node2D
 gdx --project .\demo script attach --scene res://scenes/main.tscn --node / --script res://scripts/main.gd
 gdx --project .\demo script check res://scripts/main.gd
-gdx --project .\demo script check-all
+gdx --project .\demo script check-all --jobs 4 --script-timeout-secs 60 --timeout-secs 300 --exclude res://vendor
 gdx --project .\demo script load-check
 
 gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
@@ -67,17 +73,28 @@ gdx --project .\demo resource create --type StandardMaterial3D --out res://mater
 gdx --project .\demo resource inspect --path res://materials/basic.tres
 ```
 
-`script check-all` 会对 `.gd` 文件运行严格 Godot parser 检查。只有明确需要旧的快速 resource-load 检查时才使用 `script load-check`。
+`script check-all` 使用有界 worker 池对 `.gd` 文件运行严格 Godot parser 检查。默认 job 数是 `min(available_parallelism, 4)`。可重复使用 `--exclude res://...` 剪枝指定子树；`addons/gdx_*` 中的 managed 脚本仍会被检查。
+
+## 运行记录与保留策略
+
+```powershell
+gdx --project .\demo runs list --status all --limit 50
+gdx --project .\demo runs prune
+gdx --project .\demo runs prune --apply
+```
+
+每个一次性 Godot 进程都会写入 `.gdx/runs/<run-id>/run.json` 和完整 stdout/stderr 日志。`runs prune` 默认只预览，只有 `--apply` 才删除。默认保留成功/未知记录 200 条或 7 天、失败记录 50 条或 30 天，任一限制超出即可清理已完成记录。旧运行目录只有在首次显式执行 `runs prune --apply` 后才纳入自动清理；运行中的记录和 `.gdx/daemon` 永不删除。
 
 ## Daemon 和运行时命令
 
 ```powershell
-gdx --project .\demo daemon start --restart --width 1280 --height 720
+gdx --project .\demo daemon start --restart --width 1280 --height 720 --health-timeout-secs 5
 gdx --project .\demo daemon status
 gdx --project .\demo scene tree
 gdx --project .\demo scene tree --include-script --include-groups --include-methods
 gdx --project .\demo node create --parent / --type Label --name Status
 gdx --project .\demo node set --node /Status --property text --value "Ready"
+gdx --project .\demo node set --node /Status --property metadata --value-file .\value.json
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
 gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
@@ -93,6 +110,7 @@ gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-dis
 gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
+gdx --project .\demo call invoke --target / --method start_game --args-file .\args.json
 gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
@@ -103,7 +121,9 @@ gdx --project .\demo daemon stop
 
 `input sequence` 读取 `{ "events": [...] }` JSON。事件可以是 `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`、`{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }` 或 `{ "kind": "wait", "frames": 2 }`。
 
-未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。`daemon start` 和 `daemon status` 会在顶层稳定返回 `pid`、`port`、`scene`、`runtime_status`、`runtime_version`、`protocol_version`、`methods` 和 `warnings`。`runtime_status: "unknown"` 表示项目内 runtime 早于 capabilities RPC；`runtime_status: "outdated"` 表示 runtime 已知但缺少 `touch_sequence` 等能力。
+未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。RPC ready 后会检查 `capabilities`、`scene_tree` 和启动日志；返回的 `health` 包含 `rpc_ready`、`scene_loaded`、`project_healthy`、`scene_root`、首个硬错误及耗时。新 daemon 不健康时返回 `project_unhealthy`，随后自动停止并移除 session。`--no-health-check` 跳过项目健康检查并返回 `project_healthy: null`。
+
+`daemon start` 和 `daemon status` 保留 `runtime_status`、`runtime_version`、`protocol_version`、`methods` 和 `warnings`。`runtime_status: "unknown"` 表示项目内 runtime 早于 capabilities RPC；`runtime_status: "outdated"` 表示 runtime 已知但缺少所需能力。`daemon status` 会安全移除不可达的陈旧 session。
 
 升级或重新构建 `gdx` 后，先运行 `gdx --project .\demo project update --check` 查看 managed addon 变化，再运行 `gdx --project .\demo project update` 并重启 daemon，让运行中的项目使用新的内置 runtime。
 

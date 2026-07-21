@@ -6,7 +6,14 @@ For project-facing troubleshooting documentation, see `../../../docs/en/troubles
 
 - Run `gdx doctor`.
 - If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`.
-- If Godot is not found, set `$env:GDX_GODOT = "C:\Path\To\Godot_v4.x.exe"` or pass `--godot`.
+- If Godot is not found, set `$env:GDX_GODOT = "C:\Path\To\Godot_v4.x.exe"` or pass `--godot`. Use `GDX_GODOT_STANDARD` and `GDX_GODOT_DOTNET` when both builds are installed.
+- `gdx doctor` treats .NET Godot without an SDK as a warning for GDScript-only projects, but C# projects require .NET Godot and a .NET 8+ SDK.
+
+## Long Command or Timeout
+
+- Run with `--progress ndjson` and consume stderr incrementally. `command_started`, `child_started`, and heartbeat records make silence diagnosable.
+- A timeout or Ctrl+C preserves complete logs and terminates the one-shot Godot process tree. Cancellation exits with code 130.
+- For `script check-all`, try `--jobs 1` or `--jobs 2`, repeated `--exclude res://...`, and separate per-script/global timeout values.
 
 ## Godot Native Crash
 
@@ -55,6 +62,12 @@ gdx --project .\demo daemon stop --force
 ```
 
 Daemon session data lives under `.gdx/daemon/session.json`. Prefer command cleanup over deleting files manually.
+
+If start returns `project_unhealthy`, inspect `health.first_error` and the daemon logs. The new daemon is stopped automatically. `--no-health-check` is diagnostic-only and returns `project_healthy: null`.
+
+## Run Log Growth
+
+Use `runs list`, then preview with `runs prune`. Pass `runs prune --apply` only after reviewing candidate counts and bytes. The first applied prune enrolls legacy run directories; active runs and daemon state remain protected.
 
 ## Daemon Runtime Older Than CLI
 

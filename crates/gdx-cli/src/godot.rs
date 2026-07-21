@@ -1,4 +1,5 @@
 use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -8,9 +9,41 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::constants::GDX_TOOLS_AUTOMATION_RES;
-use crate::diagnostics::{attach_log_diagnostics, classify_logs};
+use crate::diagnostics::{
+    attach_log_diagnostics, classify_logs, summarize_logs, LogSummary, WarningMode,
+};
 use crate::error::{GdxError, GdxResult};
-use crate::project::{ensure_dir, godot_path_string};
+use crate::process::{cancellation_requested, ManagedChild};
+use crate::progress::ProgressReporter;
+use crate::project::godot_path_string;
+use crate::run_store::RunHandle;
+use crate::traversal::is_generated_path;
+
+const STANDARD_GODOT_CANDIDATES: &[&str] = &[
+    "godot",
+    "godot4",
+    "Godot_v4.6-stable_win64.exe",
+    "Godot_v4.5-stable_win64.exe",
+    "Godot_v4.4-stable_win64.exe",
+    "Godot_v4.3-stable_win64.exe",
+    "Godot_v4.2-stable_win64.exe",
+    "Godot_v4.1-stable_win64.exe",
+    "Godot_v4.0-stable_win64.exe",
+    "Godot_v4.6-stable",
+    "Godot_v4.5-stable",
+    "Godot_v4.4-stable",
+    "Godot_v4.3-stable",
+    "Godot_v4.2-stable",
+    "Godot_v4.1-stable",
+    "Godot_v4.0-stable",
+];
+
+const DOTNET_GODOT_CANDIDATES: &[&str] = &[
+    "Godot_v4.6-stable_mono_win64_console.exe",
+    "Godot_v4.5-stable_mono_win64_console.exe",
+    "Godot_v4.4-stable_mono_win64_console.exe",
+    "godot-mono",
+];
 
 #[derive(Debug, Clone)]
 pub struct GodotCommand {
@@ -19,18 +52,45 @@ pub struct GodotCommand {
     pub args: Vec<String>,
     pub envs: Vec<(String, String)>,
     pub timeout_secs: u64,
+    pub deadline: Option<Instant>,
+    pub operation: String,
+    pub subject: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct GodotRunResult {
+    pub run_id: String,
+    pub operation: String,
+    pub subject: Option<String>,
+    pub child_pid: u32,
     pub status_code: i32,
+    pub duration_ms: u128,
+    pub timeout_secs: u64,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
     pub last_json: Option<Value>,
+    pub log_summary: LogSummary,
 }
 
-pub fn locate_godot(explicit: Option<&Path>) -> GdxResult<PathBuf> {
-    if let Some(path) = explicit {
+pub struct GodotSelection<'a> {
+    pub explicit: Option<&'a Path>,
+    pub standard: Option<&'a Path>,
+    pub dotnet: Option<&'a Path>,
+    pub project: Option<&'a Path>,
+}
+
+pub fn locate_godot(selection: GodotSelection<'_>) -> GdxResult<PathBuf> {
+    if let Some(path) = selection.explicit {
+        return validate_binary(path);
+    }
+
+    let project_has_csharp = selection.project.map(project_has_csharp).unwrap_or(false);
+    let typed = if project_has_csharp {
+        selection.dotnet
+    } else {
+        selection.standard
+    };
+    if let Some(path) = typed {
         return validate_binary(path);
     }
 
@@ -40,35 +100,36 @@ pub fn locate_godot(explicit: Option<&Path>) -> GdxResult<PathBuf> {
         }
     }
 
-    let candidates = [
-        "godot",
-        "godot4",
-        "Godot_v4.6-stable_win64.exe",
-        "Godot_v4.5-stable_win64.exe",
-        "Godot_v4.4-stable_win64.exe",
-        "Godot_v4.3-stable_win64.exe",
-        "Godot_v4.2-stable_win64.exe",
-        "Godot_v4.1-stable_win64.exe",
-        "Godot_v4.0-stable_win64.exe",
-        "Godot_v4.6-stable",
-        "Godot_v4.5-stable",
-        "Godot_v4.4-stable",
-        "Godot_v4.3-stable",
-        "Godot_v4.2-stable",
-        "Godot_v4.1-stable",
-        "Godot_v4.0-stable",
-    ];
-
-    for candidate in candidates {
-        if let Ok(path) = which::which(candidate) {
-            return Ok(path);
-        }
+    let candidate = if project_has_csharp {
+        find_dotnet_on_path()
+    } else {
+        find_standard_on_path()
+    };
+    if let Some(path) = candidate {
+        return Ok(path);
     }
 
     Err(GdxError::not_found(
         "godot_not_found",
         "Could not find Godot. Pass --godot <path> or set GDX_GODOT.",
     ))
+}
+
+pub fn find_standard_on_path() -> Option<PathBuf> {
+    find_on_path(STANDARD_GODOT_CANDIDATES)
+}
+
+pub fn find_dotnet_on_path() -> Option<PathBuf> {
+    find_on_path(DOTNET_GODOT_CANDIDATES)
+}
+
+fn find_on_path(candidates: &[&str]) -> Option<PathBuf> {
+    for candidate in candidates {
+        if let Ok(path) = which::which(candidate) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn validate_binary(path: &Path) -> GdxResult<PathBuf> {
@@ -82,7 +143,11 @@ fn validate_binary(path: &Path) -> GdxResult<PathBuf> {
     }
 }
 
-pub fn run_version(binary: &Path, timeout_secs: u64) -> GdxResult<String> {
+pub fn run_version(
+    binary: &Path,
+    timeout_secs: u64,
+    progress: &ProgressReporter,
+) -> GdxResult<String> {
     let run_id = format!("gdx_godot_version_{}", Uuid::new_v4().simple());
     let stdout_log = std::env::temp_dir().join(format!("{run_id}.stdout.log"));
     let stderr_log = std::env::temp_dir().join(format!("{run_id}.stderr.log"));
@@ -99,15 +164,25 @@ pub fn run_version(binary: &Path, timeout_secs: u64) -> GdxResult<String> {
         )
     })?;
 
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file))
-        .spawn()
-        .map_err(|err| GdxError::tool("spawn_failed", format!("Cannot start Godot: {err}")))?;
+        .stderr(Stdio::from(stderr_file));
+    let mut child = ManagedChild::spawn(&mut command)?;
+    let child_pid = child.id();
+    progress.child_started(
+        &run_id,
+        child_pid,
+        Some("godot --version"),
+        timeout_secs,
+        &godot_path_string(&stdout_log),
+        &godot_path_string(&stderr_log),
+    );
 
     let started = Instant::now();
+    let mut last_heartbeat = Instant::now();
     loop {
         if child
             .try_wait()
@@ -132,7 +207,12 @@ pub fn run_version(binary: &Path, timeout_secs: u64) -> GdxResult<String> {
                         status_code,
                         &stdout_log,
                         &stderr_log,
-                    ));
+                    )
+                    .with_stage("environment")
+                    .with_subject("godot --version")
+                    .with_child_pid(child_pid)
+                    .with_elapsed_ms(started.elapsed().as_millis())
+                    .with_timeout_secs(timeout_secs));
                 }
                 let message = if stderr.trim().is_empty() {
                     format!(
@@ -142,31 +222,64 @@ pub fn run_version(binary: &Path, timeout_secs: u64) -> GdxResult<String> {
                 } else {
                     stderr.trim().to_string()
                 };
-                return Err(GdxError::tool("godot_failed", message)
+                let error = GdxError::tool("godot_failed", message)
+                    .with_stage("environment")
+                    .with_subject("godot --version")
+                    .with_child_pid(child_pid)
+                    .with_elapsed_ms(started.elapsed().as_millis())
+                    .with_timeout_secs(timeout_secs)
                     .with_artifact("stdout_log", godot_path_string(&stdout_log))
-                    .with_artifact("stderr_log", godot_path_string(&stderr_log)));
+                    .with_artifact("stderr_log", godot_path_string(&stderr_log));
+                return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
             }
             let _ = fs::remove_file(&stdout_log);
             let _ = fs::remove_file(&stderr_log);
             return Ok(stdout.trim().to_string());
         }
+        if cancellation_requested() {
+            let _ = child.terminate_tree(Duration::from_secs(1));
+            let error = GdxError::cancelled("Godot version check was cancelled")
+                .with_stage("environment")
+                .with_subject("godot --version")
+                .with_child_pid(child_pid)
+                .with_elapsed_ms(started.elapsed().as_millis())
+                .with_timeout_secs(timeout_secs)
+                .with_artifact("stdout_log", godot_path_string(&stdout_log))
+                .with_artifact("stderr_log", godot_path_string(&stderr_log));
+            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+        }
         if started.elapsed() >= Duration::from_secs(timeout_secs) {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = fs::remove_file(&stdout_log);
-            let _ = fs::remove_file(&stderr_log);
-            return Err(GdxError::timeout("Timed out while running godot --version"));
+            let _ = child.terminate_tree(Duration::from_secs(1));
+            let error = GdxError::timeout("Timed out while running godot --version")
+                .with_stage("environment")
+                .with_subject("godot --version")
+                .with_child_pid(child_pid)
+                .with_elapsed_ms(started.elapsed().as_millis())
+                .with_timeout_secs(timeout_secs)
+                .with_artifact("stdout_log", godot_path_string(&stdout_log))
+                .with_artifact("stderr_log", godot_path_string(&stderr_log));
+            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+        }
+        if last_heartbeat.elapsed() >= Duration::from_secs(5) {
+            progress.heartbeat(&run_id, child_pid, Some("godot --version"));
+            last_heartbeat = Instant::now();
         }
         thread::sleep(Duration::from_millis(50));
     }
 }
 
-pub fn run(command: GodotCommand) -> GdxResult<GodotRunResult> {
-    let run_id = format!("r_{}", Uuid::new_v4().simple());
-    let run_dir = command.project.join(".gdx").join("runs").join(run_id);
-    ensure_dir(&run_dir)?;
-    let stdout_log = run_dir.join("godot.stdout.log");
-    let stderr_log = run_dir.join("godot.stderr.log");
+pub fn run(
+    command: GodotCommand,
+    progress: &ProgressReporter,
+    _warning_mode: WarningMode,
+) -> GdxResult<GodotRunResult> {
+    let mut run = RunHandle::begin(
+        &command.project,
+        &command.operation,
+        command.subject.as_deref(),
+    )?;
+    let stdout_log = run.stdout_log.clone();
+    let stderr_log = run.stderr_log.clone();
     let stdout_file = File::create(&stdout_log).map_err(|err| {
         GdxError::tool(
             "io_failed",
@@ -189,11 +302,32 @@ pub fn run(command: GodotCommand) -> GdxResult<GodotRunResult> {
     cmd.stdout(Stdio::from(stdout_file));
     cmd.stderr(Stdio::from(stderr_file));
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|err| GdxError::tool("spawn_failed", format!("Cannot start Godot: {err}")))?;
+    let mut child = match ManagedChild::spawn(&mut cmd) {
+        Ok(child) => child,
+        Err(error) => {
+            run.finish("failed", None, Duration::ZERO);
+            return Err(error
+                .with_stage("spawn")
+                .with_subject(command.subject.as_deref().unwrap_or(&command.operation))
+                .with_elapsed_ms(0)
+                .with_timeout_secs(command.timeout_secs)
+                .with_artifact("stdout_log", godot_path_string(&stdout_log))
+                .with_artifact("stderr_log", godot_path_string(&stderr_log)));
+        }
+    };
+    let child_pid = child.id();
+    run.set_child_pid(child_pid)?;
+    progress.child_started(
+        &run.run_id,
+        child_pid,
+        command.subject.as_deref(),
+        command.timeout_secs,
+        &godot_path_string(&stdout_log),
+        &godot_path_string(&stderr_log),
+    );
 
     let started = Instant::now();
+    let mut last_heartbeat = Instant::now();
     loop {
         if child
             .try_wait()
@@ -203,26 +337,68 @@ pub fn run(command: GodotCommand) -> GdxResult<GodotRunResult> {
             let status = child.wait().map_err(|err| {
                 GdxError::tool("wait_failed", format!("Cannot collect Godot status: {err}"))
             })?;
-            let stdout = fs::read_to_string(&stdout_log).map_err(|err| {
-                GdxError::tool(
-                    "io_failed",
-                    format!("Cannot read {}: {err}", stdout_log.display()),
-                )
-            })?;
+            let status_code = status.code().unwrap_or(-1);
+            let status_name = if status.success() {
+                "succeeded"
+            } else {
+                "failed"
+            };
+            run.finish(status_name, Some(status_code), started.elapsed());
             return Ok(GodotRunResult {
-                status_code: status.code().unwrap_or(-1),
+                run_id: run.run_id,
+                operation: command.operation,
+                subject: command.subject,
+                child_pid,
+                status_code,
+                duration_ms: started.elapsed().as_millis(),
+                timeout_secs: command.timeout_secs,
                 stdout_log,
                 stderr_log,
-                last_json: last_stdout_json(&stdout),
+                last_json: last_stdout_json(&run.stdout_log),
+                log_summary: summarize_logs(&run.stdout_log, &run.stderr_log),
             });
         }
 
-        if started.elapsed() >= Duration::from_secs(command.timeout_secs) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(GdxError::timeout("Timed out while running Godot")
+        if cancellation_requested() {
+            let _ = child.terminate_tree(Duration::from_secs(2));
+            run.finish("cancelled", None, started.elapsed());
+            let error = GdxError::cancelled("Godot command was cancelled")
+                .with_stage("running")
+                .with_subject(command.subject.as_deref().unwrap_or(&command.operation))
+                .with_child_pid(child_pid)
+                .with_elapsed_ms(started.elapsed().as_millis())
+                .with_timeout_secs(command.timeout_secs)
                 .with_artifact("stdout_log", godot_path_string(&stdout_log))
-                .with_artifact("stderr_log", godot_path_string(&stderr_log)));
+                .with_artifact("stderr_log", godot_path_string(&stderr_log));
+            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+        }
+
+        let overall_timed_out = command
+            .deadline
+            .map(|deadline| Instant::now() >= deadline)
+            .unwrap_or(false);
+        if overall_timed_out || started.elapsed() >= Duration::from_secs(command.timeout_secs) {
+            let _ = child.terminate_tree(Duration::from_secs(2));
+            run.finish("timed_out", None, started.elapsed());
+            let message = if overall_timed_out {
+                "Global command timeout elapsed while running Godot"
+            } else {
+                "Timed out while running Godot"
+            };
+            let error = GdxError::timeout(message)
+                .with_stage("running")
+                .with_subject(command.subject.as_deref().unwrap_or(&command.operation))
+                .with_child_pid(child_pid)
+                .with_elapsed_ms(started.elapsed().as_millis())
+                .with_timeout_secs(command.timeout_secs)
+                .with_artifact("stdout_log", godot_path_string(&stdout_log))
+                .with_artifact("stderr_log", godot_path_string(&stderr_log));
+            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+        }
+
+        if last_heartbeat.elapsed() >= Duration::from_secs(5) {
+            progress.heartbeat(&run.run_id, child_pid, command.subject.as_deref());
+            last_heartbeat = Instant::now();
         }
 
         thread::sleep(Duration::from_millis(100));
@@ -262,6 +438,11 @@ pub fn godot_failed(result: &GodotRunResult) -> GdxError {
     };
 
     error = error
+        .with_stage("godot")
+        .with_subject(result.subject.as_deref().unwrap_or(&result.operation))
+        .with_child_pid(result.child_pid)
+        .with_elapsed_ms(result.duration_ms)
+        .with_timeout_secs(result.timeout_secs)
         .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
         .with_artifact("stderr_log", godot_path_string(&result.stderr_log));
     error = if native_crash {
@@ -305,14 +486,14 @@ fn format_status_code(status_code: i32) -> String {
     }
 }
 
-pub fn run_automation(
+pub fn automation_command(
     binary: PathBuf,
     project: PathBuf,
     action: &str,
     params: Value,
     timeout_secs: u64,
-) -> GdxResult<GodotRunResult> {
-    run(GodotCommand {
+) -> GodotCommand {
+    GodotCommand {
         binary,
         project: project.clone(),
         args: vec![
@@ -327,16 +508,49 @@ pub fn run_automation(
             ("GDX_TOOL_PARAMS".to_string(), params.to_string()),
         ],
         timeout_secs,
-    })
+        deadline: None,
+        operation: action.to_string(),
+        subject: None,
+    }
 }
 
-fn last_stdout_json(stdout: &str) -> Option<Value> {
-    stdout
+fn last_stdout_json(path: &Path) -> Option<Value> {
+    let file = File::open(path).ok()?;
+    BufReader::new(file)
         .lines()
-        .rev()
-        .map(str::trim)
+        .map_while(Result::ok)
+        .map(|line| line.trim().trim_start_matches('\u{feff}').to_string())
         .filter(|line| line.starts_with('{') && line.ends_with('}'))
-        .find_map(|line| serde_json::from_str(line).ok())
+        .filter_map(|line| serde_json::from_str(&line).ok())
+        .last()
+}
+
+pub fn project_has_csharp(project: &Path) -> bool {
+    walkdir::WalkDir::new(project)
+        .into_iter()
+        .filter_entry(|entry| !is_generated_path(project, entry.path()))
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(|extension| matches!(extension, "cs" | "csproj" | "sln"))
+                    .unwrap_or(false)
+        })
+}
+
+pub fn binary_is_dotnet(binary: &Path, version: &str) -> bool {
+    version.contains(".mono.")
+        || binary
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| {
+                let lower = name.to_lowercase();
+                lower.contains("mono") || lower.contains("dotnet")
+            })
+            .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -347,7 +561,13 @@ mod tests {
     #[test]
     fn godot_failed_uses_automation_json_error() {
         let result = GodotRunResult {
+            run_id: "r_test".to_string(),
+            operation: "test".to_string(),
+            subject: Some("res://test.gd".to_string()),
+            child_pid: 1,
             status_code: 1,
+            duration_ms: 1,
+            timeout_secs: 60,
             stdout_log: PathBuf::from("stdout.log"),
             stderr_log: PathBuf::from("stderr.log"),
             last_json: Some(json!({
@@ -356,27 +576,74 @@ mod tests {
                 "message": "ResourceSaver.save failed: ERR_CANT_CREATE",
                 "details": { "out": "res://scenes/main.tscn" }
             })),
+            log_summary: LogSummary::default(),
         };
 
         let error = godot_failed(&result);
 
         assert_eq!(error.error, "save_failed");
         assert!(error.message.contains("ERR_CANT_CREATE"));
-        assert_eq!(error.details.unwrap()["out"], "res://scenes/main.tscn");
+        assert_eq!(
+            error.context.details.unwrap()["out"],
+            "res://scenes/main.tscn"
+        );
     }
 
     #[test]
     fn godot_failed_classifies_native_crash_status() {
         let result = GodotRunResult {
+            run_id: "r_test".to_string(),
+            operation: "test".to_string(),
+            subject: None,
+            child_pid: 1,
             status_code: 0xC0000005u32 as i32,
+            duration_ms: 1,
+            timeout_secs: 60,
             stdout_log: PathBuf::from("stdout.log"),
             stderr_log: PathBuf::from("stderr.log"),
             last_json: None,
+            log_summary: LogSummary::default(),
         };
 
         let error = godot_failed(&result);
 
         assert_eq!(error.error, "godot_native_crash");
         assert!(error.message.contains("0xC0000005"));
+    }
+
+    #[test]
+    fn explicit_and_project_typed_godot_selection_are_deterministic() {
+        let root = std::env::temp_dir().join(format!(
+            "gdx_godot_selection_{}_{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let explicit = root.join("explicit.exe");
+        let standard = root.join("standard.exe");
+        let dotnet = root.join("dotnet.exe");
+        for path in [&explicit, &standard, &dotnet] {
+            fs::write(path, []).unwrap();
+        }
+
+        let selected = locate_godot(GodotSelection {
+            explicit: Some(&explicit),
+            standard: Some(&standard),
+            dotnet: Some(&dotnet),
+            project: Some(&root),
+        })
+        .unwrap();
+        assert_eq!(selected, explicit);
+
+        fs::write(root.join("game.cs"), "class Game {}\n").unwrap();
+        let selected = locate_godot(GodotSelection {
+            explicit: None,
+            standard: Some(&standard),
+            dotnet: Some(&dotnet),
+            project: Some(&root),
+        })
+        .unwrap();
+        assert_eq!(selected, dotnet);
+        let _ = fs::remove_dir_all(root);
     }
 }

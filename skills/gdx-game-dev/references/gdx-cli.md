@@ -1,18 +1,24 @@
 # gdx CLI Reference
 
-All `gdx` command output is JSON. Success is written to stdout. Failures are written to stderr as JSON and may include Godot log artifacts and diagnostics.
+All final `gdx` results are JSON. Stdout contains one success object. Progress is written to stderr; in non-TTY use it is line-delimited NDJSON, and a failure object is the final stderr line.
 
 For project-facing documentation, see `../../../docs/en/cli-reference.md` or `../../../docs/zh-CN/cli-reference.md`. This reference is the compact agent-facing version.
 
 ## Global Options
 
 ```powershell
-gdx --godot <path-to-godot> --project <project-dir> <command>
+gdx --project <project-dir> --progress auto --warnings summary <command>
 ```
 
 - `--godot <path>`: override Godot binary discovery.
+- `--godot-standard` / `GDX_GODOT_STANDARD`: configure standard Godot.
+- `--godot-dotnet` / `GDX_GODOT_DOTNET`: configure .NET Godot.
 - `--project <dir>`: target an existing Godot project.
 - `GDX_GODOT`: environment variable alternative to `--godot`.
+- `--progress auto|stderr|ndjson|off`: progress format; auto uses NDJSON when stderr is not a TTY.
+- `--warnings all|summary|error`: returned diagnostic detail; complete logs remain on disk.
+
+Selection order is explicit `--godot`, project-matching typed configuration, `GDX_GODOT`, then `PATH`.
 
 Use `--project` for every command that operates on a project, including scene, script, asset, daemon, input, state, capture, resource, test, and export commands.
 
@@ -54,7 +60,7 @@ gdx --project .\demo asset inspect --path res://assets/player.png
 gdx --project .\demo script create --path res://scripts/main.gd --extends Node2D
 gdx --project .\demo script attach --scene res://scenes/main.tscn --node / --script res://scripts/main.gd
 gdx --project .\demo script check res://scripts/main.gd
-gdx --project .\demo script check-all
+gdx --project .\demo script check-all --jobs 4 --script-timeout-secs 60 --timeout-secs 300 --exclude res://vendor
 gdx --project .\demo script load-check
 
 gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
@@ -65,17 +71,28 @@ gdx --project .\demo resource inspect --path res://materials/basic.tres
 
 `script create` writes only a minimal script header. For real gameplay, edit the `.gd` file directly after creating or use normal file edits first and then run `script check-all`.
 
-`script check-all` is strict and runs Godot parser checks over `.gd` files. `script load-check` is the older fast resource-load check.
+`script check-all` is strict and runs Godot parser checks over `.gd` files with stable result ordering. Jobs default to at most four. Repeated `--exclude` values prune explicit subtrees; managed `addons/gdx_*` scripts stay in scope. `script load-check` is the older fast resource-load check.
+
+## Run History
+
+```powershell
+gdx --project .\demo runs list
+gdx --project .\demo runs prune
+gdx --project .\demo runs prune --apply
+```
+
+Every one-shot Godot child has `.gdx/runs/<run-id>/run.json` and complete logs. Prune is preview-only without `--apply`; legacy directories are enrolled only after the first applied prune.
 
 ## Daemon and Runtime Commands
 
 ```powershell
-gdx --project .\demo daemon start --restart --width 1280 --height 720
+gdx --project .\demo daemon start --restart --width 1280 --height 720 --health-timeout-secs 5
 gdx --project .\demo daemon status
 gdx --project .\demo scene tree
 gdx --project .\demo scene tree --include-script --include-groups --include-methods
 gdx --project .\demo node create --parent / --type Label --name Status
 gdx --project .\demo node set --node /Status --property text --value "Ready"
+gdx --project .\demo node set --node /Status --property metadata --value-file .\value.json
 gdx --project .\demo node set --node /Status --property position --vec2 40 40
 gdx --project .\demo scene save
 gdx --project .\demo input send --mouse-button 1 --position 120 240
@@ -91,6 +108,7 @@ gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-dis
 gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
+gdx --project .\demo call invoke --target / --method start_game --args-file .\args.json
 gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
@@ -99,7 +117,7 @@ gdx --project .\demo capture record --out .\demo\.gdx\gesture.avi --duration 3 -
 gdx --project .\demo daemon stop
 ```
 
-`daemon start` uses the configured main scene unless `--scene res://...` is supplied. `daemon start` and `daemon status` promote `pid`, `port`, `scene`, `runtime_status`, `runtime_version`, `protocol_version`, `methods`, and `warnings` at the top level. Use `project update --check`, then `project update`, then daemon restart when `runtime_status` is `unknown` or `outdated`.
+`daemon start` uses the configured main scene unless `--scene res://...` is supplied. Its `health` validates capabilities, the scene root, and hard startup errors. `project_unhealthy` stops a newly started daemon automatically. `--no-health-check` returns `project_healthy: null`. Runtime capability fields remain available; update the managed runtime when `runtime_status` is `unknown` or `outdated`.
 
 `input send --pressed` accepts `true` or `false`; `--release` is a clear alias for `--pressed false`. `input click` uses mouse events. For mobile gameplay that listens to `InputEventScreenTouch` or `InputEventScreenDrag`, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence`. Touch commands require `touch_sequence` and do not fall back to mouse events.
 
@@ -146,7 +164,7 @@ gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export
 
 When a command fails:
 
-1. Parse the stderr JSON.
+1. Parse stderr line by line; progress records have `type: "progress"` and the final failure has `ok: false`.
 2. Read `suggestion` if present.
 3. Read `details.diagnostics.primary_error` and the included log tails.
 4. Open `artifacts.stderr_log` if more context is needed.

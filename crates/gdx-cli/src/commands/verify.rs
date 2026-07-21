@@ -182,7 +182,16 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
     let execution = (|| -> GdxResult<()> {
         if let Some(script) = spec.script_check.or(spec.checks.script) {
             let value = if script.strict {
-                code::run_check_all(ctx, &code::CheckAllArgs { root: script.root })?
+                code::run_check_all(
+                    ctx,
+                    &code::CheckAllArgs {
+                        root: script.root,
+                        jobs: None,
+                        script_timeout_secs: 60,
+                        timeout_secs: 300,
+                        excludes: Vec::new(),
+                    },
+                )?
             } else {
                 code::run_load_check(ctx, &code::LoadCheckArgs { root: script.root })?
             };
@@ -210,6 +219,8 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
                     width: daemon_spec.width,
                     height: daemon_spec.height,
                     restart: daemon_spec.restart,
+                    no_health_check: false,
+                    health_timeout_secs: 5,
                 },
             )?;
             daemon_started_by_verify = value
@@ -396,7 +407,7 @@ fn run_step(
 }
 
 fn step_error(kind: &str, index: usize, mut err: GdxError) -> GdxError {
-    let details = match err.details.take() {
+    let details = match err.context.details.take() {
         Some(mut existing) if existing.is_object() => {
             existing["verify_step_kind"] = json!(kind);
             existing["verify_step_index"] = json!(index);

@@ -67,7 +67,7 @@ pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json
     let capture = ctx.abs_path(&args.out);
     ensure_parent_dir(&capture)?;
     let binary = ctx.locate_godot()?;
-    let result = godot::run(GodotCommand {
+    let result = ctx.run_godot(GodotCommand {
         binary,
         project: project.root.clone(),
         args: vec![
@@ -84,6 +84,9 @@ pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json
             ("GDX_CAPTURE_FRAMES".to_string(), args.frames.to_string()),
         ],
         timeout_secs: 120,
+        deadline: None,
+        operation: "capture.run".to_string(),
+        subject: Some(scene.clone()),
     })?;
     if result.status_code != 0 {
         return Err(godot::godot_failed(&result).with_suggestion(runtime_capture_suggestion()));
@@ -164,12 +167,15 @@ pub fn run_record(ctx: &AppContext, args: &RecordArgs) -> GdxResult<serde_json::
     } else {
         command_args.push(scene.clone());
     }
-    let result = godot::run(GodotCommand {
+    let result = ctx.run_godot(GodotCommand {
         binary,
         project: project.root.clone(),
         args: command_args,
         envs,
         timeout_secs: recording_timeout_secs(args.duration),
+        deadline: None,
+        operation: "capture.record".to_string(),
+        subject: Some(scene.clone()),
     })?;
     if result.status_code != 0 {
         return Err(godot::godot_failed(&result).with_suggestion(runtime_capture_suggestion()));

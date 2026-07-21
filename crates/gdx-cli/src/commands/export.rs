@@ -39,7 +39,7 @@ pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Va
     }
 
     let binary = ctx.locate_godot()?;
-    let result = godot::run(GodotCommand {
+    let result = ctx.run_godot(GodotCommand {
         binary,
         project: project.root.clone(),
         args: vec![
@@ -52,6 +52,9 @@ pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Va
         ],
         envs: Vec::new(),
         timeout_secs: 600,
+        deadline: None,
+        operation: "export.build".to_string(),
+        subject: Some(args.preset.clone()),
     })?;
     if result.status_code != 0 {
         return Err(godot::godot_failed(&result).with_suggestion(

@@ -67,7 +67,8 @@ function Invoke-FailingJson {
     if ([string]::IsNullOrWhiteSpace($Stderr)) {
         throw "Failed command did not emit JSON on stderr: $FilePath $($Arguments -join ' ')`nstdout:`n$Stdout"
     }
-    return $Stderr | ConvertFrom-Json
+    $FinalLine = ($Stderr -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 1)
+    return $FinalLine | ConvertFrom-Json
 }
 
 if ([string]::IsNullOrWhiteSpace($Godot)) {

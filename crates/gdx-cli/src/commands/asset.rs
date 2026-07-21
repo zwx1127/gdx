@@ -1,9 +1,10 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+use std::path::PathBuf;
 
 use clap::Args;
 use serde_json::json;
-use walkdir::WalkDir;
 
 use crate::context::{validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
@@ -73,7 +74,7 @@ pub fn run_copy(ctx: &AppContext, args: &CopyArgs) -> GdxResult<serde_json::Valu
 pub fn run_import(ctx: &AppContext, _args: &ImportArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
     let binary = ctx.locate_godot()?;
-    let result = godot::run(GodotCommand {
+    let result = ctx.run_godot(GodotCommand {
         binary,
         project: project.root.clone(),
         args: vec![
@@ -84,10 +85,14 @@ pub fn run_import(ctx: &AppContext, _args: &ImportArgs) -> GdxResult<serde_json:
         ],
         envs: Vec::new(),
         timeout_secs: 120,
+        deadline: None,
+        operation: "asset.import".to_string(),
+        subject: None,
     })?;
     if result.status_code != 0 {
-        let stderr = fs::read_to_string(&result.stderr_log).unwrap_or_default();
-        if is_mono_dotnet_unavailable(&stderr) && !project_has_csharp(&project.root) {
+        if log_has_mono_dotnet_unavailable(&result.stderr_log)
+            && !godot::project_has_csharp(&project.root)
+        {
             return Ok(json!({
                 "ok": true,
                 "command": "asset.import",
@@ -140,17 +145,12 @@ fn is_mono_dotnet_unavailable(stderr: &str) -> bool {
         || stderr.contains("Could not create child process: dotnet")
 }
 
-fn project_has_csharp(project: &Path) -> bool {
-    WalkDir::new(project)
-        .into_iter()
-        .filter_map(Result::ok)
-        .any(|entry| {
-            entry.file_type().is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .map(|extension| matches!(extension, "cs" | "csproj" | "sln"))
-                    .unwrap_or(false)
-        })
+fn log_has_mono_dotnet_unavailable(path: &Path) -> bool {
+    let Ok(file) = fs::File::open(path) else {
+        return false;
+    };
+    BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .any(|line| is_mono_dotnet_unavailable(&line))
 }

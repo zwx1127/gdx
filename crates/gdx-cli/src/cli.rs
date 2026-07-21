@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::commands::{
-    asset, code, export, init, play, project_cmd, resource, scene, session, test_cmd,
+    asset, code, export, init, play, project_cmd, resource, runs, scene, session, test_cmd,
 };
+use crate::diagnostics::WarningMode;
+use crate::progress::ProgressMode;
 
 #[derive(Debug, Parser)]
 #[command(name = "gdx", version, about = "Godot automation CLI for gdx")]
@@ -15,6 +17,18 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "DIR")]
     pub project: Option<PathBuf>,
 
+    #[arg(long, global = true, value_name = "PATH", env = "GDX_GODOT_STANDARD")]
+    pub godot_standard: Option<PathBuf>,
+
+    #[arg(long, global = true, value_name = "PATH", env = "GDX_GODOT_DOTNET")]
+    pub godot_dotnet: Option<PathBuf>,
+
+    #[arg(long, global = true, value_enum, default_value_t = ProgressMode::Auto)]
+    pub progress: ProgressMode,
+
+    #[arg(long, global = true, value_enum, default_value_t = WarningMode::Summary)]
+    pub warnings: WarningMode,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -22,6 +36,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Doctor,
+    Runs(RunsCommand),
     Project(ProjectCommand),
     Setting(SettingCommand),
     Autoload(AutoloadCommand),
@@ -40,6 +55,57 @@ pub enum Commands {
     Test(TestCommand),
     Export(ExportCommand),
     Verify(crate::commands::verify::VerifyArgs),
+}
+
+impl Cli {
+    pub fn command_name(&self) -> &'static str {
+        match &self.command {
+            Commands::Doctor => "doctor",
+            Commands::Runs(command) => match command.command {
+                RunsSubcommand::List(_) => "runs.list",
+                RunsSubcommand::Prune(_) => "runs.prune",
+            },
+            Commands::Project(_) => "project",
+            Commands::Setting(_) => "setting",
+            Commands::Autoload(_) => "autoload",
+            Commands::InputMap(_) => "input-map",
+            Commands::Asset(_) => "asset",
+            Commands::Script(command) => match command.command {
+                ScriptSubcommand::Create(_) => "script.create",
+                ScriptSubcommand::Attach(_) => "script.attach",
+                ScriptSubcommand::Check(_) => "script.check",
+                ScriptSubcommand::CheckAll(_) => "script.check-all",
+                ScriptSubcommand::LoadCheck(_) => "script.load-check",
+            },
+            Commands::Scene(_) => "scene",
+            Commands::Node(_) => "node",
+            Commands::Daemon(command) => match command.command {
+                DaemonSubcommand::Start(_) => "daemon.start",
+                DaemonSubcommand::Status(_) => "daemon.status",
+                DaemonSubcommand::Stop(_) => "daemon.stop",
+            },
+            Commands::Input(_) => "input",
+            Commands::Call(_) => "call.invoke",
+            Commands::State(_) => "state.get",
+            Commands::Capture(_) => "capture",
+            Commands::Resource(_) => "resource",
+            Commands::Test(_) => "test.run",
+            Commands::Export(_) => "export.build",
+            Commands::Verify(_) => "verify",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct RunsCommand {
+    #[command(subcommand)]
+    pub command: RunsSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunsSubcommand {
+    List(runs::ListArgs),
+    Prune(runs::PruneArgs),
 }
 
 #[derive(Debug, Args)]

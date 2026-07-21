@@ -1,12 +1,113 @@
-use std::fs;
+use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::GdxError;
 use crate::project::godot_path_string;
 
 const MAX_TAIL_LINES: usize = 40;
+const MAX_GROUPS: usize = 1_000;
+const SUMMARY_GROUPS: usize = 20;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum WarningMode {
+    All,
+    #[default]
+    Summary,
+    Error,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct LogRecord {
+    pub severity: String,
+    pub code: String,
+    pub message: String,
+    pub location: Option<String>,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct LogSummary {
+    pub errors: u64,
+    pub warnings: u64,
+    pub unique_errors: usize,
+    pub unique_warnings: usize,
+    pub first_error: Option<LogRecord>,
+    pub first_warning: Option<LogRecord>,
+    pub groups: Vec<LogRecord>,
+    pub groups_truncated: bool,
+}
+
+impl LogSummary {
+    pub fn merge(&mut self, other: &Self) {
+        self.errors += other.errors;
+        self.warnings += other.warnings;
+        if self.first_error.is_none() {
+            self.first_error = other.first_error.clone();
+        }
+        if self.first_warning.is_none() {
+            self.first_warning = other.first_warning.clone();
+        }
+        let mut groups: Vec<LogRecord> = Vec::new();
+        let mut indexes: HashMap<String, usize> = HashMap::new();
+        let mut truncated = self.groups_truncated || other.groups_truncated;
+        for record in self.groups.iter().chain(&other.groups) {
+            let key = record_key(record);
+            if let Some(index) = indexes.get(&key).copied() {
+                groups[index].count += record.count;
+            } else if groups.len() < MAX_GROUPS {
+                indexes.insert(key, groups.len());
+                groups.push(record.clone());
+            } else {
+                truncated = true;
+            }
+        }
+        self.groups = groups;
+        self.groups_truncated = truncated;
+        self.recount_unique();
+    }
+
+    pub fn filtered(&self, mode: WarningMode) -> Self {
+        let mut value = self.clone();
+        value.groups = match mode {
+            WarningMode::All => value.groups,
+            WarningMode::Summary => value.groups.into_iter().take(SUMMARY_GROUPS).collect(),
+            WarningMode::Error => value
+                .groups
+                .into_iter()
+                .filter(|record| record.severity == "error")
+                .take(SUMMARY_GROUPS)
+                .collect(),
+        };
+        value.groups_truncated |= value.groups.len() < self.groups.len();
+        value
+    }
+
+    pub fn first_hard_error(&self, csharp_project: bool) -> Option<&LogRecord> {
+        self.groups.iter().find(|record| {
+            record.severity == "error" && (csharp_project || record.code != "dotnet_sdk_missing")
+        })
+    }
+
+    fn recount_unique(&mut self) {
+        self.unique_errors = self
+            .groups
+            .iter()
+            .filter(|record| record.severity == "error")
+            .count();
+        self.unique_warnings = self
+            .groups
+            .iter()
+            .filter(|record| record.severity == "warning")
+            .count();
+    }
+}
 
 pub fn attach_log_diagnostics(
     mut error: GdxError,
@@ -15,20 +116,7 @@ pub fn attach_log_diagnostics(
 ) -> GdxError {
     let diagnostics = diagnose_logs(stdout_log, stderr_log);
     if diagnostics != Value::Null {
-        let details = match error.details.take() {
-            Some(mut existing) if existing.is_object() => {
-                existing["diagnostics"] = diagnostics;
-                existing
-            }
-            Some(existing) => json!({
-                "context": existing,
-                "diagnostics": diagnostics
-            }),
-            None => json!({
-                "diagnostics": diagnostics
-            }),
-        };
-        error = error.with_details(details);
+        error.insert_detail("diagnostics", diagnostics);
     }
     error
 }
@@ -36,96 +124,323 @@ pub fn attach_log_diagnostics(
 pub fn diagnose_logs(stdout_log: &Path, stderr_log: &Path) -> Value {
     let stdout_tail = read_tail(stdout_log);
     let stderr_tail = read_tail(stderr_log);
-    let combined = format!("{stdout_tail}\n{stderr_tail}");
-    let primary = classify(&combined);
-
-    if primary.is_none() && stdout_tail.is_empty() && stderr_tail.is_empty() {
+    let summary = summarize_logs(stdout_log, stderr_log);
+    if summary.errors == 0
+        && summary.warnings == 0
+        && stdout_tail.is_empty()
+        && stderr_tail.is_empty()
+    {
         return Value::Null;
     }
-
+    let primary = summary
+        .first_error
+        .as_ref()
+        .map(|record| record.code.as_str())
+        .unwrap_or("unknown_godot_failure");
     json!({
-        "primary_error": primary.unwrap_or("unknown_godot_failure"),
+        "primary_error": primary,
         "stdout_log": godot_path_string(stdout_log),
         "stderr_log": godot_path_string(stderr_log),
         "stdout_tail": stdout_tail,
         "stderr_tail": stderr_tail,
+        "log_summary": summary.filtered(WarningMode::Summary),
     })
 }
 
+pub fn summarize_logs(stdout_log: &Path, stderr_log: &Path) -> LogSummary {
+    let mut summary = summarize_file(stdout_log);
+    summary.merge(&summarize_file(stderr_log));
+    summary
+}
+
 pub fn classify_logs(stdout_log: &Path, stderr_log: &Path) -> Option<&'static str> {
-    let stdout_tail = read_tail(stdout_log);
-    let stderr_tail = read_tail(stderr_log);
-    let combined = format!("{stdout_tail}\n{stderr_tail}");
-    classify(&combined)
+    let summary = summarize_logs(stdout_log, stderr_log);
+    summary
+        .first_error
+        .as_ref()
+        .map(|record| static_code(&record.code))
 }
 
 pub fn read_tail(path: &Path) -> String {
-    let text = fs::read_to_string(path).unwrap_or_default();
-    if text.trim().is_empty() {
+    let Ok(file) = File::open(path) else {
         return String::new();
+    };
+    let mut lines = VecDeque::with_capacity(MAX_TAIL_LINES);
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        if lines.len() == MAX_TAIL_LINES {
+            lines.pop_front();
+        }
+        lines.push_back(line);
     }
-    let lines: Vec<&str> = text.lines().collect();
-    let start = lines.len().saturating_sub(MAX_TAIL_LINES);
-    lines[start..].join("\n")
+    lines.into_iter().collect::<Vec<_>>().join("\n")
 }
 
-fn classify(text: &str) -> Option<&'static str> {
-    let lower = text.to_lowercase();
-    if lower.contains("crashhandlerexception")
+fn summarize_file(path: &Path) -> LogSummary {
+    let Ok(file) = File::open(path) else {
+        return LogSummary::default();
+    };
+    let mut records: Vec<LogRecord> = Vec::new();
+    let mut indexes: HashMap<String, usize> = HashMap::new();
+    let mut groups_truncated = false;
+    let mut first_error = None;
+    let mut first_warning = None;
+    let mut errors = 0;
+    let mut warnings = 0;
+    let mut current: Option<LogRecord> = None;
+
+    let flush = |current: &mut Option<LogRecord>,
+                 records: &mut Vec<LogRecord>,
+                 indexes: &mut HashMap<String, usize>,
+                 groups_truncated: &mut bool,
+                 first_error: &mut Option<LogRecord>,
+                 first_warning: &mut Option<LogRecord>,
+                 errors: &mut u64,
+                 warnings: &mut u64| {
+        let Some(mut record) = current.take() else {
+            return;
+        };
+        record.count = 1;
+        if record.severity == "error" {
+            *errors += 1;
+            if first_error.is_none() {
+                *first_error = Some(record.clone());
+            }
+        } else {
+            *warnings += 1;
+            if first_warning.is_none() {
+                *first_warning = Some(record.clone());
+            }
+        }
+        let key = record_key(&record);
+        if let Some(index) = indexes.get(&key).copied() {
+            records[index].count += 1;
+        } else if records.len() < MAX_GROUPS {
+            indexes.insert(key, records.len());
+            records.push(record);
+        } else {
+            *groups_truncated = true;
+        }
+    };
+
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        if let Some((severity, message)) = record_header(&line) {
+            flush(
+                &mut current,
+                &mut records,
+                &mut indexes,
+                &mut groups_truncated,
+                &mut first_error,
+                &mut first_warning,
+                &mut errors,
+                &mut warnings,
+            );
+            current = Some(LogRecord {
+                severity: severity.to_string(),
+                code: classify_message(message).to_string(),
+                message: message.trim().to_string(),
+                location: None,
+                count: 1,
+            });
+        } else if classify_message(&line) == "godot_native_crash" {
+            flush(
+                &mut current,
+                &mut records,
+                &mut indexes,
+                &mut groups_truncated,
+                &mut first_error,
+                &mut first_warning,
+                &mut errors,
+                &mut warnings,
+            );
+            current = Some(LogRecord {
+                severity: "error".to_string(),
+                code: "godot_native_crash".to_string(),
+                message: line.trim().to_string(),
+                location: None,
+                count: 1,
+            });
+        } else if let Some(record) = current.as_mut() {
+            let trimmed = line.trim();
+            if record.location.is_none() && trimmed.starts_with("at:") {
+                record.location = Some(trimmed.to_string());
+            }
+        }
+    }
+    flush(
+        &mut current,
+        &mut records,
+        &mut indexes,
+        &mut groups_truncated,
+        &mut first_error,
+        &mut first_warning,
+        &mut errors,
+        &mut warnings,
+    );
+
+    let mut summary = LogSummary {
+        errors,
+        warnings,
+        unique_errors: 0,
+        unique_warnings: 0,
+        first_error,
+        first_warning,
+        groups: records,
+        groups_truncated,
+    };
+    summary.recount_unique();
+    summary
+}
+
+fn record_header(line: &str) -> Option<(&'static str, &str)> {
+    if let Some(message) = line.strip_prefix("WARNING:") {
+        Some(("warning", message))
+    } else if let Some(message) = line.strip_prefix("SCRIPT ERROR:") {
+        Some(("error", message))
+    } else {
+        line.strip_prefix("ERROR:")
+            .map(|message| ("error", message))
+    }
+}
+
+fn record_key(record: &LogRecord) -> String {
+    format!(
+        "{}\0{}\0{}",
+        record.severity,
+        record.message,
+        record.location.as_deref().unwrap_or_default()
+    )
+}
+
+fn classify_message(message: &str) -> &'static str {
+    let lower = message.to_lowercase();
+    if lower.contains(".net sdk not found")
+        || lower.contains("failed to load hostfxr")
+        || lower.contains("failed to get list of installed sdks")
+    {
+        "dotnet_sdk_missing"
+    } else if lower.contains("crashhandlerexception")
         || lower.contains("program crashed with signal 11")
         || lower.contains("0xc0000005")
     {
-        Some("godot_native_crash")
+        "godot_native_crash"
     } else if lower.contains("warning treated as error")
         || lower.contains("cannot infer the type")
         || lower.contains("will be typed as variant")
     {
-        Some("gdscript_warning_as_error")
+        "gdscript_warning_as_error"
     } else if lower.contains("parse error") || lower.contains("parser error") {
-        Some("gdscript_parse_error")
-    } else if lower.contains("scene_load_failed") || lower.contains("cannot load scene") {
-        Some("scene_load_failed")
-    } else if lower.contains("script_load_failed") || lower.contains("cannot load script") {
-        Some("script_load_failed")
-    } else if lower.contains("cannot connect to daemon") || lower.contains("daemon_connect_failed")
-    {
-        Some("daemon_connect_failed")
-    } else if lower.contains("exited early") || lower.contains("daemon_exited") {
-        Some("daemon_exited")
+        "gdscript_parse_error"
+    } else if lower.contains("cannot load scene") || lower.contains("scene_load_failed") {
+        "scene_load_failed"
+    } else if lower.contains("cannot load script") || lower.contains("script_load_failed") {
+        "script_load_failed"
+    } else if lower.contains("failed to open") || lower.contains("permission denied") {
+        "filesystem_unavailable"
     } else {
-        None
+        "godot_error"
+    }
+}
+
+fn static_code(code: &str) -> &'static str {
+    match code {
+        "dotnet_sdk_missing" => "dotnet_sdk_missing",
+        "godot_native_crash" => "godot_native_crash",
+        "gdscript_warning_as_error" => "gdscript_warning_as_error",
+        "gdscript_parse_error" => "gdscript_parse_error",
+        "scene_load_failed" => "scene_load_failed",
+        "script_load_failed" => "script_load_failed",
+        "filesystem_unavailable" => "filesystem_unavailable",
+        _ => "godot_error",
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::io::{BufWriter, Write};
 
     #[test]
-    fn classifies_warning_as_error() {
-        let text =
-            "Cannot infer the type of \"content_bottom\" variable.\nWarning treated as error.";
-
-        assert_eq!(classify(text), Some("gdscript_warning_as_error"));
+    fn streams_and_deduplicates_warning_records() {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_log_summary_{}_{}.log",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(
+            &path,
+            "WARNING: repeated\n   at: load (a.cpp:1)\nWARNING: repeated\n   at: load (a.cpp:1)\nERROR: Parse Error: bad\n",
+        )
+        .unwrap();
+        let summary = summarize_file(&path);
+        assert_eq!(summary.warnings, 2);
+        assert_eq!(summary.unique_warnings, 1);
+        assert_eq!(summary.errors, 1);
+        assert_eq!(
+            summary
+                .groups
+                .iter()
+                .find(|v| v.severity == "warning")
+                .unwrap()
+                .count,
+            2
+        );
+        assert_eq!(summary.first_error.unwrap().code, "gdscript_parse_error");
+        let _ = fs::remove_file(path);
     }
 
     #[test]
-    fn classifies_parse_error() {
-        assert_eq!(
-            classify("Parse Error: Unexpected identifier"),
-            Some("gdscript_parse_error")
-        );
+    fn dotnet_error_is_nonfatal_for_gdscript_projects() {
+        let summary = LogSummary {
+            errors: 1,
+            groups: vec![LogRecord {
+                severity: "error".into(),
+                code: "dotnet_sdk_missing".into(),
+                message: ".NET Sdk not found".into(),
+                count: 1,
+                ..LogRecord::default()
+            }],
+            ..LogSummary::default()
+        };
+        assert!(summary.first_hard_error(false).is_none());
+        assert!(summary.first_hard_error(true).is_some());
     }
 
     #[test]
-    fn classifies_native_crash() {
-        assert_eq!(
-            classify("CrashHandlerException: Program crashed with signal 11"),
-            Some("godot_native_crash")
-        );
-        assert_eq!(
-            classify("Godot exited with status 0xc0000005"),
-            Some("godot_native_crash")
-        );
+    fn recognizes_unprefixed_native_crash_lines() {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_native_crash_{}_{}.log",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(&path, "CrashHandlerException: 0xC0000005\n").unwrap();
+
+        let summary = summarize_file(&path);
+
+        assert_eq!(summary.first_error.unwrap().code, "godot_native_crash");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn streams_one_hundred_mib_without_expanding_unique_groups() {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_large_log_{}_{}.log",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let line = format!("WARNING: repeated {}\n", "x".repeat(980));
+        let iterations = (100usize * 1024 * 1024).div_ceil(line.len());
+        let mut writer = BufWriter::new(fs::File::create(&path).unwrap());
+        for _ in 0..iterations {
+            writer.write_all(line.as_bytes()).unwrap();
+        }
+        writer.flush().unwrap();
+
+        let summary = summarize_file(&path);
+
+        assert_eq!(summary.warnings, iterations as u64);
+        assert_eq!(summary.unique_warnings, 1);
+        assert_eq!(summary.groups.len(), 1);
+        let _ = fs::remove_file(path);
     }
 }

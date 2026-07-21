@@ -14,6 +14,7 @@ use crate::project::{
 
 use super::addons::{self, AddonUpdateOptions};
 use super::init::ensure_gdx_gitignore;
+use crate::traversal::{is_gdx_managed_addon, is_generated_path};
 
 #[derive(Debug, Args)]
 pub struct InstallArgs {}
@@ -429,9 +430,9 @@ fn is_ignored_path(project: &Path, path: &Path) -> bool {
     if path == project {
         return false;
     }
-    let Ok(rel) = path.strip_prefix(project) else {
+    if is_generated_path(project, path) || is_gdx_managed_addon(project, path) {
         return true;
-    };
+    }
     if path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -440,20 +441,7 @@ fn is_ignored_path(project: &Path, path: &Path) -> bool {
     {
         return true;
     }
-    let mut components = rel.components();
-    match components
-        .next()
-        .and_then(|component| component.as_os_str().to_str())
-    {
-        Some(".godot" | ".gdx" | ".git" | ".agent-relay") => true,
-        Some("addons") => matches!(
-            components
-                .next()
-                .and_then(|component| component.as_os_str().to_str()),
-            Some("gdx_tools" | "gdx_runtime" | "gdx_daemon")
-        ),
-        _ => false,
-    }
+    false
 }
 
 fn push_limited(values: &mut Vec<String>, value: String, max: usize) {
@@ -528,11 +516,7 @@ mod tests {
     }
 
     fn context_for(project: &std::path::Path) -> AppContext {
-        AppContext {
-            godot: None,
-            project: Some(project.to_path_buf()),
-            cwd: project.to_path_buf(),
-        }
+        AppContext::new(None, Some(project.to_path_buf())).unwrap()
     }
 
     fn update_args(check: bool, force: bool) -> UpdateArgs {
@@ -683,11 +667,7 @@ mod tests {
     #[test]
     fn inspect_walks_project_root_and_ignores_generated_files() {
         let project = temp_project();
-        let ctx = AppContext {
-            godot: None,
-            project: Some(project.clone()),
-            cwd: project.clone(),
-        };
+        let ctx = context_for(&project);
 
         let value = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
 
@@ -720,11 +700,7 @@ mod tests {
     fn inspect_truncates_each_kind_independently() {
         let project = temp_project();
         fs::write(project.join("scripts").join("second.gd"), "extends Node\n").unwrap();
-        let ctx = AppContext {
-            godot: None,
-            project: Some(project.clone()),
-            cwd: project.clone(),
-        };
+        let ctx = context_for(&project);
 
         let value = run_inspect(&ctx, &InspectArgs { max_files: 1 }).unwrap();
 

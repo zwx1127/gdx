@@ -67,7 +67,7 @@ pub struct AddNodeArgs {
 #[command(group(
     ArgGroup::new("scene_set_value")
         .required(true)
-        .args(["value", "number", "bool_value", "vec2", "vec3", "color", "resource", "node_path"])
+        .args(["value", "value_file", "number", "bool_value", "vec2", "vec3", "color", "resource", "node_path"])
 ))]
 pub struct SetPropertyArgs {
     #[arg(long)]
@@ -78,6 +78,9 @@ pub struct SetPropertyArgs {
 
     #[arg(long)]
     pub value: Option<String>,
+
+    #[arg(long)]
+    pub value_file: Option<PathBuf>,
 
     #[arg(long, allow_hyphen_values = true)]
     pub number: Option<f64>,
@@ -130,7 +133,7 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
     ensure_parent_dir(&scene_abs)?;
     let binary = ctx.locate_godot()?;
 
-    let result = godot::run(GodotCommand {
+    let result = ctx.run_godot(GodotCommand {
         binary,
         project: project.root.clone(),
         args: vec![
@@ -147,6 +150,9 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
             ("GDX_SCENE_FORCE".to_string(), args.force.to_string()),
         ],
         timeout_secs: 60,
+        deadline: None,
+        operation: "scene.create".to_string(),
+        subject: Some(args.out.clone()),
     })?;
 
     if result.status_code != 0 {
@@ -271,7 +277,7 @@ pub fn run_add_node(ctx: &AppContext, args: &AddNodeArgs) -> GdxResult<serde_jso
 pub fn run_set_property(ctx: &AppContext, args: &SetPropertyArgs) -> GdxResult<serde_json::Value> {
     validate_non_empty("node", &args.node)?;
     validate_non_empty("property", &args.property)?;
-    let value = scene_set_value(args)?;
+    let value = scene_set_value(ctx, args)?;
     let project = ctx.project()?;
     let result = daemon::rpc(
         &project.root,
@@ -291,9 +297,12 @@ pub fn run_set_property(ctx: &AppContext, args: &SetPropertyArgs) -> GdxResult<s
     }))
 }
 
-fn scene_set_value(args: &SetPropertyArgs) -> GdxResult<serde_json::Value> {
+fn scene_set_value(ctx: &AppContext, args: &SetPropertyArgs) -> GdxResult<serde_json::Value> {
     if let Some(value) = &args.value {
         return Ok(serde_json::Value::String(value.clone()));
+    }
+    if let Some(path) = &args.value_file {
+        return read_json_file(ctx, path);
     }
     if let Some(number) = args.number {
         return serde_json::Number::from_f64(number)
@@ -359,6 +368,7 @@ mod tests {
             node: "/Title".to_string(),
             property: "text".to_string(),
             value: None,
+            value_file: None,
             number: None,
             bool_value: None,
             vec2: None,
@@ -374,7 +384,7 @@ mod tests {
         let mut args = base_set_args();
         args.resource = Some("res://assets/icon.svg".to_string());
 
-        let value = scene_set_value(&args).unwrap();
+        let value = scene_set_value(&AppContext::new(None, None).unwrap(), &args).unwrap();
 
         assert_eq!(value, json!({ "resource": "res://assets/icon.svg" }));
     }
@@ -384,7 +394,7 @@ mod tests {
         let mut args = base_set_args();
         args.color = Some(vec![0.1, 0.2, 0.3]);
 
-        let value = scene_set_value(&args).unwrap();
+        let value = scene_set_value(&AppContext::new(None, None).unwrap(), &args).unwrap();
 
         assert_eq!(value, json!({ "color": [0.1, 0.2, 0.3, 1.0] }));
     }
