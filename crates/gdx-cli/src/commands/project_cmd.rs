@@ -1,11 +1,9 @@
-use std::path::Path;
-
 use clap::Args;
 use serde_json::json;
-use walkdir::WalkDir;
 
 use crate::context::{validate_non_empty, validate_res_path, AppContext};
 use crate::error::{GdxError, GdxResult};
+use crate::godot;
 use crate::project::{
     godot_path_string, list_project_settings, read_main_scene, read_project_name,
     read_project_setting, remove_project_setting, res_to_abs, set_project_setting_quoted,
@@ -13,11 +11,6 @@ use crate::project::{
 };
 
 use super::addons::{self, AddonUpdateOptions};
-use super::init::ensure_gdx_gitignore;
-use crate::traversal::{is_gdx_managed_addon, is_generated_path};
-
-#[derive(Debug, Args)]
-pub struct InstallArgs {}
 
 #[derive(Debug, Args)]
 pub struct UpdateArgs {
@@ -29,10 +22,7 @@ pub struct UpdateArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct InspectArgs {
-    #[arg(long, default_value_t = 500)]
-    pub max_files: usize,
-}
+pub struct InspectArgs {}
 
 #[derive(Debug, Args)]
 pub struct SettingGetArgs {
@@ -109,22 +99,6 @@ pub struct InputRemoveArgs {
 #[derive(Debug, Args)]
 pub struct InputListArgs {}
 
-pub fn run_install(ctx: &AppContext, _args: &InstallArgs) -> GdxResult<serde_json::Value> {
-    let project = ctx.project()?;
-    let mut files = addons::install_gdx_addons(&project.root)?;
-    if ensure_gdx_gitignore(&project.root)? {
-        files.push(".gitignore".to_string());
-    }
-    files.sort();
-
-    Ok(json!({
-        "ok": true,
-        "command": "project.install",
-        "project": godot_path_string(&project.root),
-        "files": files
-    }))
-}
-
 pub fn run_update(ctx: &AppContext, args: &UpdateArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
     let report = addons::update_gdx_addons(
@@ -135,95 +109,31 @@ pub fn run_update(ctx: &AppContext, args: &UpdateArgs) -> GdxResult<serde_json::
         },
     )?;
 
+    let changes: Vec<_> = report
+        .files
+        .into_iter()
+        .filter(|file| file.action != "unchanged")
+        .collect();
     Ok(json!({
         "ok": true,
         "command": "project.update",
         "project": godot_path_string(&project.root),
-        "cli_version": report.cli_version,
         "up_to_date": report.up_to_date,
         "changed": report.changed,
         "check": report.check,
         "restart_daemon_required": report.restart_daemon_required,
-        "files": report.files
+        "changes": changes
     }))
 }
 
-pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json::Value> {
+pub fn run_inspect(ctx: &AppContext, _args: &InspectArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
-    let mut scenes = Vec::new();
-    let mut scripts = Vec::new();
-    let mut assets = Vec::new();
-    let mut others = Vec::new();
-    let mut scene_count = 0usize;
-    let mut script_count = 0usize;
-    let mut asset_count = 0usize;
-    let mut other_count = 0usize;
-
-    for entry in WalkDir::new(&project.root)
-        .into_iter()
-        .filter_entry(|entry| !is_ignored_path(&project.root, entry.path()))
-    {
-        let entry = entry.map_err(|err| {
-            crate::error::GdxError::tool("walk_failed", format!("Cannot inspect project: {err}"))
-        })?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Some(res_path) = to_res_path(&project.root, entry.path()) else {
-            continue;
-        };
-        match entry
-            .path()
-            .extension()
-            .and_then(|extension| extension.to_str())
-        {
-            Some("tscn" | "scn") => {
-                scene_count += 1;
-                push_limited(&mut scenes, res_path, args.max_files);
-            }
-            Some("gd" | "cs") => {
-                script_count += 1;
-                push_limited(&mut scripts, res_path, args.max_files);
-            }
-            Some(
-                "png" | "jpg" | "jpeg" | "webp" | "svg" | "glb" | "gltf" | "ogg" | "wav" | "mp3"
-                | "tres" | "res" | "gdshader" | "material",
-            ) => {
-                asset_count += 1;
-                push_limited(&mut assets, res_path, args.max_files);
-            }
-            _ => {
-                other_count += 1;
-                push_limited(&mut others, res_path, args.max_files);
-            }
-        }
-    }
-
-    scenes.sort();
-    scripts.sort();
-    assets.sort();
-    others.sort();
     let main_scene = read_main_scene(&project.root)?;
     let main_scene_exists = main_scene
         .as_deref()
         .map(|path| res_to_abs(&project.root, path).map(|path| path.is_file()))
         .transpose()?;
-    let autoloads = list_project_settings(&project.root, "autoload")?;
-    let input_map = list_project_settings(&project.root, "input")?;
-    let scenes_truncated = scene_count > scenes.len();
-    let scripts_truncated = script_count > scripts.len();
-    let assets_truncated = asset_count > assets.len();
-    let other_truncated = other_count > others.len();
-    let truncated = scenes_truncated || scripts_truncated || assets_truncated || other_truncated;
     let gdx_addons = addons::inspect_gdx_addons(&project.root)?;
-    let gdx_create_scene_installed =
-        gdx_file_installed(&gdx_addons.files, "addons/gdx_tools/create_scene.gd");
-    let gdx_automation_installed =
-        gdx_file_installed(&gdx_addons.files, "addons/gdx_tools/automation.gd");
-    let gdx_capture_runner_installed =
-        gdx_file_installed(&gdx_addons.files, "addons/gdx_runtime/capture_runner.tscn");
-    let gdx_daemon_installed =
-        gdx_file_installed(&gdx_addons.files, "addons/gdx_daemon/daemon_server.tscn");
 
     Ok(json!({
         "ok": true,
@@ -232,48 +142,12 @@ pub fn run_inspect(ctx: &AppContext, args: &InspectArgs) -> GdxResult<serde_json
         "name": read_project_name(&project.root)?,
         "main_scene": main_scene,
         "main_scene_exists": main_scene_exists,
-        "autoloads": autoloads,
-        "input_map": input_map,
+        "language": godot::project_language_mode(&project.root).as_str(),
         "gdx": {
             "installed": gdx_addons.installed,
-            "up_to_date": gdx_addons.up_to_date,
-            "cli_version": gdx_addons.cli_version,
-            "files": {
-                "create_scene": gdx_create_scene_installed,
-                "automation": gdx_automation_installed,
-                "capture_runner": gdx_capture_runner_installed,
-                "daemon": gdx_daemon_installed
-            },
-            "managed_files": gdx_addons.files
-        },
-        "files": {
-            "scenes": scenes,
-            "scripts": scripts,
-            "assets": assets,
-            "other": others,
-            "truncated": truncated,
-            "max_files": args.max_files,
-            "truncated_by_kind": {
-                "scenes": scenes_truncated,
-                "scripts": scripts_truncated,
-                "assets": assets_truncated,
-                "other": other_truncated
-            }
-        },
-        "summary": {
-            "scenes": scene_count,
-            "scripts": script_count,
-            "assets": asset_count,
-            "other": other_count,
-            "files": scene_count + script_count + asset_count + other_count
+            "up_to_date": gdx_addons.up_to_date
         }
     }))
-}
-
-fn gdx_file_installed(files: &[addons::AddonFileReport], path: &str) -> bool {
-    files
-        .iter()
-        .any(|file| file.path == path && file.status_before != "missing")
 }
 
 pub fn run_setting_get(ctx: &AppContext, args: &SettingGetArgs) -> GdxResult<serde_json::Value> {
@@ -426,38 +300,6 @@ pub fn run_input_list(ctx: &AppContext, _args: &InputListArgs) -> GdxResult<serd
     }))
 }
 
-fn is_ignored_path(project: &Path, path: &Path) -> bool {
-    if path == project {
-        return false;
-    }
-    if is_generated_path(project, path) || is_gdx_managed_addon(project, path) {
-        return true;
-    }
-    if path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| matches!(extension, "import" | "uid"))
-        .unwrap_or(false)
-    {
-        return true;
-    }
-    false
-}
-
-fn push_limited(values: &mut Vec<String>, value: String, max: usize) {
-    if values.len() < max {
-        values.push(value);
-    }
-}
-
-fn to_res_path(project: &Path, path: &Path) -> Option<String> {
-    let rel = path.strip_prefix(project).ok()?;
-    Some(format!(
-        "res://{}",
-        rel.to_string_lossy().replace('\\', "/")
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,16 +366,7 @@ mod tests {
     }
 
     fn file_report<'a>(value: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
-        value["files"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|file| file["path"] == path)
-            .unwrap()
-    }
-
-    fn managed_file_report<'a>(value: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
-        value["gdx"]["managed_files"]
+        value["changes"]
             .as_array()
             .unwrap()
             .iter()
@@ -544,6 +377,7 @@ mod tests {
     #[test]
     fn update_installs_missing_gdx_addons() {
         let project = temp_minimal_project("missing");
+        fs::write(project.join(".gitignore"), "artifacts/\n").unwrap();
         let ctx = context_for(&project);
 
         let value = run_update(&ctx, &update_args(false, false)).unwrap();
@@ -555,8 +389,11 @@ mod tests {
         let automation = file_report(&value, AUTOMATION_GD);
         assert_eq!(automation["status_before"], "missing");
         assert_eq!(automation["action"], "created");
-        assert!(automation["actual_hash"].is_null());
         assert!(project.join(AUTOMATION_GD).is_file());
+        assert_eq!(
+            fs::read_to_string(project.join(".gitignore")).unwrap(),
+            "artifacts/\n"
+        );
 
         let _ = fs::remove_dir_all(project);
     }
@@ -617,11 +454,7 @@ mod tests {
         assert_eq!(value["changed"], false);
         assert_eq!(value["up_to_date"], true);
         assert_eq!(value["restart_daemon_required"], false);
-        assert!(value["files"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|file| file["status_before"] == "current" && file["action"] == "unchanged"));
+        assert!(value["changes"].as_array().unwrap().is_empty());
 
         let _ = fs::remove_dir_all(project);
     }
@@ -631,84 +464,40 @@ mod tests {
         let project = temp_minimal_project("inspect_gdx");
         let ctx = context_for(&project);
 
-        let missing = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        let missing = run_inspect(&ctx, &InspectArgs {}).unwrap();
         assert_eq!(missing["gdx"]["installed"], false);
         assert_eq!(missing["gdx"]["up_to_date"], false);
-        assert_eq!(
-            managed_file_report(&missing, AUTOMATION_GD)["status_before"],
-            "missing"
-        );
 
         run_update(&ctx, &update_args(false, false)).unwrap();
-        let current = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        let current = run_inspect(&ctx, &InspectArgs {}).unwrap();
         assert_eq!(current["gdx"]["installed"], true);
         assert_eq!(current["gdx"]["up_to_date"], true);
-        assert_eq!(
-            managed_file_report(&current, AUTOMATION_GD)["status_before"],
-            "current"
-        );
 
         fs::write(
             project.join(AUTOMATION_GD),
             "extends SceneTree\n# old runtime\n",
         )
         .unwrap();
-        let outdated = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        let outdated = run_inspect(&ctx, &InspectArgs {}).unwrap();
         assert_eq!(outdated["gdx"]["installed"], true);
         assert_eq!(outdated["gdx"]["up_to_date"], false);
-        assert_eq!(
-            managed_file_report(&outdated, AUTOMATION_GD)["status_before"],
-            "outdated"
-        );
 
         let _ = fs::remove_dir_all(project);
     }
 
     #[test]
-    fn inspect_walks_project_root_and_ignores_generated_files() {
+    fn inspect_reports_only_project_identity_and_tool_status() {
         let project = temp_project();
         let ctx = context_for(&project);
 
-        let value = run_inspect(&ctx, &InspectArgs { max_files: 10 }).unwrap();
+        let value = run_inspect(&ctx, &InspectArgs {}).unwrap();
 
         assert_eq!(value["main_scene"], "res://scenes/main.tscn");
         assert_eq!(value["main_scene_exists"], true);
-        assert_eq!(value["summary"]["scenes"], 1);
-        assert_eq!(value["summary"]["scripts"], 1);
-        assert_eq!(value["summary"]["assets"], 1);
-        assert!(value["files"]["scenes"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("res://scenes/main.tscn")));
-        assert!(value["files"]["scripts"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("res://scripts/main.gd")));
-        assert!(value["files"]["assets"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("res://assets/icon.png")));
-        assert!(!value["files"]["scripts"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("res://.godot/ignored.gd")));
-
-        let _ = fs::remove_dir_all(project);
-    }
-
-    #[test]
-    fn inspect_truncates_each_kind_independently() {
-        let project = temp_project();
-        fs::write(project.join("scripts").join("second.gd"), "extends Node\n").unwrap();
-        let ctx = context_for(&project);
-
-        let value = run_inspect(&ctx, &InspectArgs { max_files: 1 }).unwrap();
-
-        assert_eq!(value["summary"]["scripts"], 2);
-        assert_eq!(value["files"]["scripts"].as_array().unwrap().len(), 1);
-        assert_eq!(value["files"]["assets"].as_array().unwrap().len(), 1);
-        assert_eq!(value["files"]["truncated_by_kind"]["scripts"], true);
-        assert_eq!(value["files"]["truncated_by_kind"]["assets"], false);
+        assert_eq!(value["name"], "Inspect Demo");
+        assert_eq!(value["language"], "gdscript");
+        assert!(value.get("files").is_none());
+        assert!(value.get("summary").is_none());
 
         let _ = fs::remove_dir_all(project);
     }

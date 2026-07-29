@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt;
 
 use serde_json::Value;
@@ -16,7 +15,6 @@ pub struct GdxError {
 #[derive(Debug, Clone, Default)]
 pub struct GdxErrorContext {
     pub suggestion: Option<String>,
-    pub artifacts: BTreeMap<String, String>,
     pub details: Option<Value>,
     pub command: Option<String>,
     pub run_id: Option<String>,
@@ -63,11 +61,6 @@ impl GdxError {
 
     pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
         self.context.suggestion = Some(suggestion.into());
-        self
-    }
-
-    pub fn with_artifact(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.context.artifacts.insert(key.into(), value.into());
         self
     }
 

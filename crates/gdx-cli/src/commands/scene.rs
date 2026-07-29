@@ -118,7 +118,9 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
     if !project.root.join(GDX_TOOLS_CREATE_SCENE_GD).is_file() {
         return Err(
             GdxError::user("gdx_addons_missing", "gdx project addon files are missing")
-                .with_suggestion("Run gdx project install --project <dir> before creating scenes."),
+                .with_suggestion(
+                    "Run `gdx --project <dir> project update` before creating scenes.",
+                ),
         );
     }
 
@@ -135,7 +137,6 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
 
     let result = ctx.run_godot(GodotCommand {
         binary,
-        project: project.root.clone(),
         args: vec![
             "--headless".to_string(),
             "--path".to_string(),
@@ -165,9 +166,7 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
                 "Godot completed but scene was not created: {}",
                 scene_abs.display()
             ),
-        )
-        .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
-        .with_artifact("stderr_log", godot_path_string(&result.stderr_log)));
+        ));
     }
     let scene_res = abs_to_res(&project.root, &scene_abs)?;
     if args.set_main {
@@ -187,10 +186,6 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
         "set_main": args.set_main,
         "godot": {
             "last_json": result.last_json
-        },
-        "artifacts": {
-            "stdout_log": godot_path_string(&result.stdout_log),
-            "stderr_log": godot_path_string(&result.stderr_log)
         }
     }))
 }

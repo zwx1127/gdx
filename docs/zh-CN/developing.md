@@ -5,7 +5,7 @@
 ## 仓库结构
 
 - `crates/gdx-cli/src/`：CLI 命令、上下文、Godot 进程处理、daemon RPC、诊断和 JSON 输出。
-- `crates/gdx-cli/resources/addons/`：`project install` 安装到目标项目的 Godot 脚本。
+- `crates/gdx-cli/resources/addons/`：由 `project update` 安装或更新到目标项目的 Godot 脚本。
 - `docs/`：用户、agent 和开发者文档。
 - `skills/gdx-game-dev/`：Codex skill 和紧凑命令参考。
 - `tests/e2e/`：PowerShell 脚本，用临时 Godot 项目验证真实工作流。

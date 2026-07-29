@@ -1,41 +1,48 @@
 # gdx CLI 参考
 
-所有 `gdx` 命令结果都是 JSON。stdout 只包含一个最终成功对象；进度和失败写到 stderr。非交互环境中的进度采用逐行 NDJSON，失败时 stderr 最后一行仍是现有 `{ "ok": false, ... }` 错误对象。
+`gdx` 是无状态、可组合的 Godot CLI。成功命令只向 stdout 写一行紧凑 JSON；进度和失败写入 stderr。使用 `--progress ndjson` 时，失败对象是 stderr 的最后一行。
+
+需要保留输出时直接使用 shell 重定向：
+
+```powershell
+gdx --project .\demo --progress ndjson script check-all 1>result.json 2>progress.ndjson
+```
+
+gdx 不在项目中持久化命令结果、进度或一次性 Godot 日志。构建来源信息只由 `doctor` 返回。
 
 ## 全局选项
 
 ```powershell
-gdx --project <project-dir> --progress auto --warnings summary <command>
+gdx --project <project-dir> --progress auto <command>
 ```
 
-- `--godot <path>` 覆盖 Godot 二进制发现结果。
-- `--godot-standard <path>` / `GDX_GODOT_STANDARD` 配置标准版 Godot。
-- `--godot-dotnet <path>` / `GDX_GODOT_DOTNET` 配置支持 .NET 的 Godot。
-- `--project <dir>` 指定已有 Godot 项目。
-- `GDX_GODOT` 是 `--godot` 的环境变量替代方式。
-- `--progress auto|stderr|ndjson|off` 默认在 TTY 输出人类可读进度，其他环境输出 NDJSON；长命令至少每 5 秒发出一次心跳。
-- `--warnings all|summary|error` 控制结果中返回的诊断分组；完整日志始终保留。
+- `--godot <path>`：显式指定 Godot。
+- `--godot-standard <path>` / `GDX_GODOT_STANDARD`：配置标准版 Godot。
+- `--godot-dotnet <path>` / `GDX_GODOT_DOTNET`：配置 .NET 版 Godot。
+- `--project <dir>`：指定已有 Godot 项目。
+- `GDX_GODOT`：`--godot` 的环境变量形式。
+- `--progress auto|stderr|ndjson|off`：TTY 默认显示人类可读进度，非 TTY 默认 NDJSON；长命令会发送 heartbeat。
 
-Godot 选择顺序为：显式 `--godot`、与项目类型匹配的标准/.NET 配置、`GDX_GODOT`、`PATH`。
+Godot 选择顺序是：显式 `--godot`、与项目语言匹配的标准/.NET 配置、`GDX_GODOT`、`PATH`。
 
-凡是操作项目的命令都使用 `--project`。
-
-## 环境和项目
+## 环境与项目
 
 ```powershell
 gdx doctor
 gdx project create --path .\demo --name Demo
-gdx --project .\demo project install
-gdx --project .\demo project update
 gdx --project .\demo project update --check
+gdx --project .\demo project update
 gdx --project .\demo project update --force
 gdx --project .\demo project inspect
 ```
 
-`project install` 会把 runtime 文件安装到 `addons/gdx_*`。
-`project update` 会用当前 CLI 内置内容刷新这些 managed addon 文件。使用 `--check` 只报告状态不写入，使用 `--force` 重写全部 managed addon 文件。
+`project create` 只接受不存在或空目录。它创建最小项目、安装 `addons/gdx_*` 管理文件，并且只向 `.gitignore` 增加 `.godot/`。
 
-## 设置、autoload 和输入
+`project update` 是管理 addon 的唯一安装/更新入口。`--check` 只报告待变更文件，`--force` 重写全部管理文件。更新已有项目不会修改 `.gitignore`。
+
+`project inspect` 只返回项目标识、主场景、语言和 addon 状态。`doctor` 才返回可执行文件、Godot、.NET、项目语言和 runtime 的详细诊断。
+
+## 设置、autoload 与 Input Map
 
 ```powershell
 gdx --project .\demo setting get --section application --key run/main_scene
@@ -49,12 +56,9 @@ gdx --project .\demo input-map remove --action jump
 gdx --project .\demo input-map list
 ```
 
-`--keycode` 使用 Godot 接受的 keycode 整数。
-
-## 资源、脚本、场景和 resource
+## 资产、脚本、场景与资源
 
 ```powershell
-gdx --project .\demo asset copy --from C:\Assets\player.png --to res://assets/player.png --force
 gdx --project .\demo asset import
 gdx --project .\demo asset inspect --path res://assets/player.png
 
@@ -65,7 +69,7 @@ gdx --project .\demo script check-all --jobs 4 --script-timeout-secs 60 --timeou
 gdx --project .\demo script load-check
 
 gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
-gdx --project .\demo scene build --spec .\scene_spec.json
+gdx --project .\demo scene build --spec .\scene-spec.json
 gdx --project .\demo scene tree
 gdx --project .\demo scene save
 
@@ -73,73 +77,50 @@ gdx --project .\demo resource create --type StandardMaterial3D --out res://mater
 gdx --project .\demo resource inspect --path res://materials/basic.tres
 ```
 
-`script check-all` 使用有界 worker 池对 `.gd` 文件运行严格 Godot parser 检查。默认 job 数是 `min(available_parallelism, 4)`。可重复使用 `--exclude res://...` 剪枝指定子树；`addons/gdx_*` 中的 managed 脚本仍会被检查。
+用 shell 或构建系统复制业务资产；项目工作流判断需要导入时再显式执行 `asset import`。`script check-all` 使用有界并行，并只返回汇总计数，不展开每个成功脚本。
 
-## 运行记录与保留策略
-
-```powershell
-gdx --project .\demo runs list --status all --limit 50
-gdx --project .\demo runs prune
-gdx --project .\demo runs prune --apply
-```
-
-每个一次性 Godot 进程都会写入 `.gdx/runs/<run-id>/run.json` 和完整 stdout/stderr 日志。`runs prune` 默认只预览，只有 `--apply` 才删除。默认保留成功/未知记录 200 条或 7 天、失败记录 50 条或 30 天，任一限制超出即可清理已完成记录。旧运行目录只有在首次显式执行 `runs prune --apply` 后才纳入自动清理；运行中的记录和 `.gdx/daemon` 永不删除。
-
-## Daemon 和运行时命令
+## Daemon 与运行时命令
 
 ```powershell
-gdx --project .\demo daemon start --restart --width 1280 --height 720 --health-timeout-secs 5
+gdx --project .\demo daemon start --restart --width 1280 --height 720
 gdx --project .\demo daemon status
-gdx --project .\demo scene tree
 gdx --project .\demo scene tree --include-script --include-groups --include-methods
 gdx --project .\demo node create --parent / --type Label --name Status
 gdx --project .\demo node set --node /Status --property text --value "Ready"
-gdx --project .\demo node set --node /Status --property metadata --value-file .\value.json
-gdx --project .\demo node set --node /Status --property position --vec2 40 40
 gdx --project .\demo scene save
-gdx --project .\demo input send --mouse-button 1 --position 120 240
 gdx --project .\demo input send --mouse-button 1 --position 120 240 --pressed false
-gdx --project .\demo input send --mouse-button 1 --position 120 240 --release
 gdx --project .\demo input click --position 120 240
 gdx --project .\demo input click-node --target /StartButton
 gdx --project .\demo input touch --position 120 240 --pressed true
 gdx --project .\demo input tap --position 120 240
 gdx --project .\demo input drag --from 120 240 --to 220 260
-gdx --project .\demo input swipe --from 120 240 --to 220 240
 gdx --project .\demo input pinch --center 180 240 --start-distance 120 --end-distance 40
-gdx --project .\demo input sequence --spec .\demo\.gdx\touch-sequence.json
+gdx --project .\demo input sequence --spec .\touch-sequence.json
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
-gdx --project .\demo call invoke --target / --method start_game --args-file .\args.json
+Get-Content -Raw .\args.json | gdx --project .\demo call invoke --target / --method start_game --args-json -
+gdx --project .\demo call invoke --target / --method show_area --arg "河流 石桥"
 gdx --project .\demo state get --target /
-gdx --project .\demo state get --target / --method gdx_state
-gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
+gdx --project .\demo capture daemon --out .\artifacts\capture.png
 gdx --project .\demo daemon stop
 ```
 
-`input send --pressed` 接受 `true` 或 `false`；`--release` 是 `--pressed false` 的清晰别名。`input click` 使用鼠标事件。移动端玩法如果监听 `InputEventScreenTouch` 或 `InputEventScreenDrag`，使用 `input tap`、`input drag`、`input swipe`、`input pinch` 或 `input sequence`。Touch 命令要求 daemon runtime 支持 `touch_sequence`；缺失时会报告 `daemon_runtime_outdated`，不会降级成鼠标事件。
+`daemon start` 在启动 Godot 前验证管理 runtime 的兼容性，并检查 RPC、场景加载与启动硬错误。新建 daemon 不健康时会自动停止；已经运行但不健康的 daemon 只报告错误，保留给开发者检查或停止。
 
-`input sequence` 读取 `{ "events": [...] }` JSON。事件可以是 `{ "kind": "touch", "index": 0, "position": [120, 240], "pressed": true }`、`{ "kind": "drag", "index": 0, "position": [160, 260], "relative": [40, 20] }` 或 `{ "kind": "wait", "frames": 2 }`。
+活动 daemon 的 session 和当前日志存放在按项目规范路径散列的用户 OS 临时目录中。`daemon stop`、陈旧 session 检测和启动失败都会清理这些状态。`daemon start/status` 只返回紧凑的 `runtime` 与 `health`，不会返回 token 或完整 capability 列表。
 
-未提供 `--scene res://...` 时，`daemon start` 使用项目配置的 main scene。RPC ready 后会检查 `capabilities`、`scene_tree` 和启动日志；返回的 `health` 包含 `rpc_ready`、`scene_loaded`、`project_healthy`、`scene_root`、首个硬错误及耗时。新 daemon 不健康时返回 `project_unhealthy`，随后自动停止并移除 session。`--no-health-check` 跳过项目健康检查并返回 `project_healthy: null`。
+触控命令要求 runtime 支持 `touch_sequence`，不会降级成鼠标输入。拖动和滑动都使用 `input drag`；释放事件使用 `input send --pressed false`。重复 `--arg` 只生成字符串；类型化参数使用 `--args-json <数组>`，或用 `--args-json -` 从 stdin 读取。JSON 错误只报告来源和位置，不复制输入内容。
 
-`daemon start` 和 `daemon status` 保留 `runtime_status`、`runtime_version`、`protocol_version`、`methods` 和 `warnings`。`runtime_status: "unknown"` 表示项目内 runtime 早于 capabilities RPC；`runtime_status: "outdated"` 表示 runtime 已知但缺少所需能力。`daemon status` 会安全移除不可达的陈旧 session。
-
-升级或重新构建 `gdx` 后，先运行 `gdx --project .\demo project update --check` 查看 managed addon 变化，再运行 `gdx --project .\demo project update` 并重启 daemon，让运行中的项目使用新的内置 runtime。
-
-`state get --target /` 不会发送空的 `method` 或 `property`，runtime 会在目标实现时默认调用 `gdx_state()`。返回结果包含 `target`、`source`、`method` 或 `property`、`state`，即使 `state` 为 null 也能看出实际查询了什么。
-
-`scene tree --include-methods` 会列出匹配 `--method-prefix` 的可调用方法，默认前缀是 `gdx_`。这些字段只用于诊断；gdx 不会自动选择替代 target。
-
-## Verify、截图、测试和导出
+## Verify、捕获、测试与导出
 
 ```powershell
-gdx --project .\demo verify --spec .\demo\.gdx\verify.json
-gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
-gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
-gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
+gdx --project .\demo verify --spec .\verify.json
+gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\artifacts\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\artifacts\recording.avi --duration 3 --fps 60
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
-gdx --project .\demo export build --preset "Windows Desktop" --out .\demo\export\game.exe
+gdx --project .\demo export build --preset "Windows Desktop" --out .\export\game.exe
 ```
 
-`capture run` 启动一次性截图 runner。`capture daemon` 截取当前 daemon session。`capture record` 使用 Godot Movie Writer 启动一个新的场景实例并写出 AVI，不会录制当前 daemon session。`capture record --input-sequence <json>` 会在这个 fresh scene 里回放 touch 事件，方便验收手势动画过程。导出需要 `export_presets.cfg` 和已安装的 Godot export templates。
+`verify` 是用于脚本检查、Godot 测试、daemon 调用、状态读取、输入与截图的通用声明式编排器。结果只返回紧凑的 `steps` 摘要，不复制每个子命令的完整 envelope。产品断言、视觉基线、比较指标、阈值、mask 和验收规则属于游戏业务层。
+
+`capture run` 等一次性 Godot 命令使用命令结束即删除的临时日志；失败只保留有界结构化诊断尾部，不返回日志路径。`capture daemon`、`capture record` 和 export 只返回调用方明确要求生成的 artifact。

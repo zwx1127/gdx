@@ -10,7 +10,8 @@ use crate::constants::{
 use crate::error::{GdxError, GdxResult};
 use crate::project::ensure_parent_dir;
 
-pub(crate) const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const MANAGED_RUNTIME_VERSION: &str = "0.1.1";
+pub(crate) const MANAGED_PROTOCOL_VERSION: u64 = 1;
 
 struct ResourceFile {
     path: &'static str,
@@ -52,7 +53,6 @@ pub(crate) struct AddonUpdateOptions {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct AddonUpdateReport {
-    pub cli_version: &'static str,
     pub up_to_date: bool,
     pub changed: bool,
     pub check: bool,
@@ -62,10 +62,8 @@ pub(crate) struct AddonUpdateReport {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct AddonInspectReport {
-    pub cli_version: &'static str,
     pub installed: bool,
     pub up_to_date: bool,
-    pub files: Vec<AddonFileReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,6 +71,16 @@ pub(crate) struct AddonFileReport {
     pub path: String,
     pub status_before: &'static str,
     pub action: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DaemonRuntimeReport {
+    pub status: &'static str,
+    pub compatible: bool,
+    pub expected_version: &'static str,
+    pub actual_version: Option<String>,
+    pub expected_protocol_version: u64,
+    pub actual_protocol_version: Option<u64>,
     pub expected_hash: String,
     pub actual_hash: Option<String>,
 }
@@ -106,8 +114,6 @@ pub(crate) fn update_gdx_addons(
             path: file.path.to_string(),
             status_before: status.status_before.as_str(),
             action,
-            expected_hash: status.expected_hash,
-            actual_hash: status.actual_hash,
         });
     }
 
@@ -121,7 +127,6 @@ pub(crate) fn update_gdx_addons(
     };
 
     Ok(AddonUpdateReport {
-        cli_version: CLI_VERSION,
         up_to_date,
         changed: wrote,
         check: options.check,
@@ -131,36 +136,90 @@ pub(crate) fn update_gdx_addons(
 }
 
 pub(crate) fn inspect_gdx_addons(project: &Path) -> GdxResult<AddonInspectReport> {
-    let mut files = Vec::new();
+    let mut installed = true;
+    let mut up_to_date = true;
     for file in ADDON_FILES {
         let status = inspect_file(project, file)?;
-        files.push(AddonFileReport {
-            path: file.path.to_string(),
-            status_before: status.status_before.as_str(),
-            action: "none",
-            expected_hash: status.expected_hash,
-            actual_hash: status.actual_hash,
-        });
+        installed &= status.status_before != AddonStatus::Missing;
+        up_to_date &= status.status_before == AddonStatus::Current;
     }
-    let installed = files
-        .iter()
-        .all(|file| file.status_before != AddonStatus::Missing.as_str());
-    let up_to_date = files
-        .iter()
-        .all(|file| file.status_before == AddonStatus::Current.as_str());
 
     Ok(AddonInspectReport {
-        cli_version: CLI_VERSION,
         installed,
         up_to_date,
-        files,
+    })
+}
+
+pub(crate) fn inspect_daemon_runtime(project: &Path) -> GdxResult<DaemonRuntimeReport> {
+    let daemon_files: Vec<_> = ADDON_FILES
+        .iter()
+        .filter(|file| file.path.starts_with("addons/gdx_daemon/"))
+        .collect();
+    let expected_hash = aggregate_hash(
+        daemon_files
+            .iter()
+            .map(|file| (file.path, file.contents.as_bytes())),
+    );
+    let mut actual_parts = Vec::new();
+    let mut missing = false;
+    let mut current = true;
+    for file in daemon_files {
+        let path = project.join(file.path);
+        match fs::read(&path) {
+            Ok(bytes) => {
+                current &= bytes == file.contents.as_bytes();
+                actual_parts.push((file.path, bytes));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                missing = true;
+                current = false;
+            }
+            Err(err) => {
+                return Err(GdxError::tool(
+                    "io_failed",
+                    format!("Cannot read {}: {err}", path.display()),
+                ));
+            }
+        }
+    }
+    let actual_hash = (!missing).then(|| {
+        aggregate_hash(
+            actual_parts
+                .iter()
+                .map(|(path, bytes)| (*path, bytes.as_slice())),
+        )
+    });
+    let server_path = project.join(GDX_DAEMON_SERVER_GD);
+    let server = fs::read_to_string(&server_path).ok();
+    let actual_version = server
+        .as_deref()
+        .and_then(|text| parse_string_constant(text, "RUNTIME_VERSION"));
+    let actual_protocol_version = server
+        .as_deref()
+        .and_then(|text| parse_u64_constant(text, "PROTOCOL_VERSION"));
+    let compatible = current
+        && actual_version.as_deref() == Some(MANAGED_RUNTIME_VERSION)
+        && actual_protocol_version == Some(MANAGED_PROTOCOL_VERSION);
+    Ok(DaemonRuntimeReport {
+        status: if missing {
+            "missing"
+        } else if compatible {
+            "current"
+        } else {
+            "outdated"
+        },
+        compatible,
+        expected_version: MANAGED_RUNTIME_VERSION,
+        actual_version,
+        expected_protocol_version: MANAGED_PROTOCOL_VERSION,
+        actual_protocol_version,
+        expected_hash,
+        actual_hash,
     })
 }
 
 struct FileStatus {
     status_before: AddonStatus,
-    expected_hash: String,
-    actual_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,13 +240,10 @@ impl AddonStatus {
 }
 
 fn inspect_file(project: &Path, file: &ResourceFile) -> GdxResult<FileStatus> {
-    let expected_hash = content_hash(file.contents.as_bytes());
     let path = project.join(PathBuf::from(file.path));
     if !path.exists() {
         return Ok(FileStatus {
             status_before: AddonStatus::Missing,
-            expected_hash,
-            actual_hash: None,
         });
     }
 
@@ -197,17 +253,12 @@ fn inspect_file(project: &Path, file: &ResourceFile) -> GdxResult<FileStatus> {
             format!("Cannot read {}: {err}", path.display()),
         )
     })?;
-    let actual_hash = content_hash(&actual);
     let status_before = if actual == file.contents.as_bytes() {
         AddonStatus::Current
     } else {
         AddonStatus::Outdated
     };
-    Ok(FileStatus {
-        status_before,
-        expected_hash,
-        actual_hash: Some(actual_hash),
-    })
+    Ok(FileStatus { status_before })
 }
 
 fn action_for(status: AddonStatus, options: AddonUpdateOptions) -> &'static str {
@@ -255,4 +306,68 @@ fn content_hash(bytes: &[u8]) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+fn aggregate_hash<'a>(parts: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String {
+    let mut bytes = Vec::new();
+    for (path, contents) in parts {
+        bytes.extend_from_slice(path.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(contents);
+        bytes.push(0xFF);
+    }
+    content_hash(&bytes)
+}
+
+fn parse_string_constant(text: &str, name: &str) -> Option<String> {
+    let prefix = format!("const {name} :=");
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix))
+        .map(str::trim)
+        .and_then(|value| value.strip_prefix('"'))
+        .and_then(|value| value.strip_suffix('"'))
+        .map(str::to_string)
+}
+
+fn parse_u64_constant(text: &str, name: &str) -> Option<u64> {
+    let prefix = format!("const {name} :=");
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix))
+        .map(str::trim)
+        .and_then(|value| value.parse().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_runtime_constants_match_embedded_daemon() {
+        let server = include_str!("../../resources/addons/gdx_daemon/daemon_server.gd");
+        assert_eq!(
+            parse_string_constant(server, "RUNTIME_VERSION").as_deref(),
+            Some(MANAGED_RUNTIME_VERSION)
+        );
+        assert_eq!(
+            parse_u64_constant(server, "PROTOCOL_VERSION"),
+            Some(MANAGED_PROTOCOL_VERSION)
+        );
+    }
+
+    #[test]
+    fn daemon_runtime_reports_missing_and_current() {
+        let project = std::env::temp_dir().join(format!(
+            "gdx_runtime_report_{}_{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&project).unwrap();
+        assert_eq!(inspect_daemon_runtime(&project).unwrap().status, "missing");
+
+        install_gdx_addons(&project).unwrap();
+        let report = inspect_daemon_runtime(&project).unwrap();
+        assert_eq!(report.status, "current");
+        assert!(report.compatible);
+        let _ = fs::remove_dir_all(project);
+    }
 }

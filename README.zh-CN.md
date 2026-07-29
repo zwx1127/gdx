@@ -2,77 +2,55 @@
 
 中文 | [English](README.md)
 
-`gdx` 是一个面向 Godot 4.x 项目的 Rust CLI，用于让脚本和 AI agent 自动化操作真实的 Godot 工程。它封装 Godot 官方命令行工作流，并把项目创建、场景编辑、运行时控制、截图、测试和导出暴露为 JSON 输出的命令。
+`gdx` 是用于真实 Godot 4.x 项目的 Rust 自动化 CLI。它封装 Godot 官方命令行工作流，并通过 JSON 命令提供项目脚手架、场景编辑、运行时控制、截图、录制、测试与导出。
 
-`gdx` 不是游戏迁移框架，也不是游戏引擎抽象层。调用方，通常是 Codex 或其他编码 agent，仍然负责游戏设计、架构、GDScript、场景 spec、资源和失败分析。`gdx` 只提供围绕 Godot 的可靠自动化层。
-
-当 `gdx` 配合 [`agent-relay`](https://github.com/zwx1127/agent-relay) 这类远程 agent 操作项目使用时，可以实现通过聊天工具随时随地开发 Godot 游戏。Godot、Codex 和项目文件仍然运行在可信本地机器上，你可以从 Telegram 或 Lark/飞书发送需求、批准操作、运行检查、查看截图，并持续调整开发方向。
+`gdx` 不是游戏迁移框架或引擎抽象层。调用方仍负责游戏设计、业务架构、GDScript、场景 spec、资产、测试逻辑和失败分析；gdx 只提供可靠、无状态、可组合的 Godot 开发工具。
 
 ## 能做什么
 
-- 创建新的 Godot 项目并配置 main scene。
-- 把 `gdx` runtime addons 安装到已有 Godot 项目。
-- 把已安装项目内的 gdx addons 更新到当前 `gdx` CLI 内置 runtime。
-- 设置项目配置、autoload 和 input map。
-- 复制、导入和检查资源。
-- 创建、挂载、解析检查和加载检查 GDScript。
+- 创建最小 Godot 项目，或为已有项目安装/更新 `addons/gdx_*` 管理文件。
+- 设置项目配置、autoload 与 Input Map。
+- 导入和检查资产。
+- 创建、挂载并检查 GDScript。
 - 直接创建场景，或从 JSON spec 构建场景。
-- 启动本地 Godot daemon，用于实时场景编辑、输入、方法调用、状态读取和截图。
-- 运行 Godot 测试脚本和多步骤 verify spec。
-- 通过 Godot export preset 构建导出产物。
-- 配合 [`agent-relay`](https://github.com/zwx1127/agent-relay)，从聊天工具远程操作本地 Codex 加 `gdx` 的开发闭环。
+- 启动本地 daemon，执行实时场景编辑、输入、方法调用、状态读取和截图。
+- 使用 Godot Movie Writer 录制短 AVI。
+- 运行 Godot 测试和声明式 verify spec。
+- 通过 Godot export preset 构建导出。
 
-所有成功命令都会把 JSON 写到 stdout。失败会把 JSON 写到 stderr，并可能包含 Godot 日志、诊断信息和修复建议。
+成功命令只向 stdout 输出一行紧凑 JSON。进度与失败写入 stderr；失败对象是 stderr 的最后一行。`doctor` 返回实际 gdx 可执行文件、版本和构建 commit。
+
+gdx 不在游戏项目中持久化命令结果、进度或一次性日志。需要保留时直接使用 shell：
+
+```powershell
+gdx --project .\demo --progress ndjson script check-all 1>result.json 2>progress.ndjson
+```
 
 ## 快速开始
 
-构建 CLI：
-
 ```powershell
 cargo build --workspace
-```
-
-检查 `gdx` 是否能找到 Godot：
-
-```powershell
 target\debug\gdx.exe doctor
-```
 
-如果 Godot 不在 `PATH`，可以显式传入路径，或设置 `GDX_GODOT`：
-
-```powershell
-$env:GDX_GODOT = "C:\Path\To\Godot_v4.x.exe"
-target\debug\gdx.exe --godot $env:GDX_GODOT doctor
-```
-
-创建并检查一个最小项目：
-
-```powershell
 target\debug\gdx.exe project create --path .\demo --name Demo
-target\debug\gdx.exe --project .\demo scene create --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
+target\debug\gdx.exe --project .\demo scene create `
+    --out res://scenes/main.tscn --root-type Node2D --name Main --set-main
 target\debug\gdx.exe --project .\demo project inspect
 ```
 
-凡是操作已有 Godot 项目的命令，都使用 `--project <dir>` 指定项目目录。
+Godot 不在 `PATH` 时，使用 `--godot <path>` 或设置 `GDX_GODOT`。操作已有项目的命令始终传入 `--project <dir>`。
 
 ## 常用工作流
 
-接入已有项目：
-
-```powershell
-gdx --project C:\Path\To\GodotProject project install
-gdx --project C:\Path\To\GodotProject project inspect
-```
-
-升级或重新构建 `gdx` 后，更新已接入项目：
+接入或更新已有项目：
 
 ```powershell
 gdx --project C:\Path\To\GodotProject project update --check
 gdx --project C:\Path\To\GodotProject project update
-gdx --project C:\Path\To\GodotProject daemon start --restart
+gdx --project C:\Path\To\GodotProject project inspect
 ```
 
-构建并验证项目文件：
+构建与验证：
 
 ```powershell
 gdx --project .\demo asset import
@@ -80,32 +58,25 @@ gdx --project .\demo script check-all
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 ```
 
-使用 daemon 做运行时编辑和截图：
+只有业务工作流确认导入资产已变化时才运行 `asset import`；daemon 不猜测业务层资产状态。
+
+运行时编辑与截图：
 
 ```powershell
 gdx --project .\demo daemon start --restart --width 1280 --height 720
 gdx --project .\demo scene tree
 gdx --project .\demo node create --parent / --type Label --name Title
 gdx --project .\demo node set --node /Title --property text --value "Hello from gdx"
-gdx --project .\demo node set --node /Title --property position --vec2 40 40
 gdx --project .\demo scene save
-gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
+gdx --project .\demo capture daemon --out .\artifacts\capture.png
 gdx --project .\demo daemon stop
 ```
 
-录制一个从场景重新启动开始的短 AVI，用于检查动画节奏：
+录制与 verify：
 
 ```powershell
-gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
-gdx --project .\demo capture record --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
-```
-
-`--input-sequence` 会在 Movie Writer 启动的新场景里回放 `input sequence` 使用的同一种 touch sequence JSON。
-
-运行多步骤 verify spec：
-
-```powershell
-gdx --project .\demo verify --spec .\demo\.gdx\verify.json
+gdx --project .\demo capture record --out .\artifacts\recording.avi --duration 3 --fps 60
+gdx --project .\demo verify --spec .\verify.json
 ```
 
 ```json
@@ -116,10 +87,20 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
   "steps": [
     { "call": { "target": "/", "method": "gdx_start_run", "args": [] } },
     { "state": { "target": "/", "method": "gdx_state" } },
-    { "capture": { "out": ".gdx/capture.png", "frames": 10 } }
+    { "capture": { "out": "artifacts/capture.png", "frames": 10 } }
   ]
 }
 ```
+
+## 定位与边界
+
+- gdx 负责通用 Godot 工具能力和脚手架，不实现具体游戏业务。
+- `scene build` 接受 Godot 专用 JSON spec，spec 由调用方生成。
+- daemon 绑定 `127.0.0.1`，用于可信本地自动化；临时 session 和日志不写入项目。
+- 视觉 baseline、比较指标、阈值、mask、玩法断言和产品验收规则属于游戏项目。
+- `capture record` 启动新场景，不录制当前 daemon session。
+- Touch 手势要求 daemon runtime 支持 `touch_sequence`，不会降级为鼠标事件。
+- Export 需要 Godot export preset 和 export templates。
 
 ## 文档
 
@@ -129,47 +110,9 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
 - [故障排查](docs/zh-CN/troubleshooting.md)
 - [开发 gdx](docs/zh-CN/developing.md)
 
-内置 Codex skill 位于 [`skills/gdx-game-dev`](skills/gdx-game-dev/SKILL.md)。它面向需要通过 `gdx` 构建、修改、运行、测试、截图和导出 Godot 游戏的 agent。
+内置 Codex skill 位于 [`skills/gdx-game-dev`](skills/gdx-game-dev/SKILL.md)。
 
-远程开发时，把 Codex 和 `gdx` 运行在安装了 Godot 的本地机器上，再用 [`agent-relay`](https://github.com/zwx1127/agent-relay) 作为聊天控制面。这样文件访问、Godot 执行、daemon session 和导出仍留在本机，同时可以离开工作站继续开发和审阅进展。
-
-agent-relay 项目链接：<https://github.com/zwx1127/agent-relay>
-
-## 环境要求
-
-- Rust stable，使用仓库中的 `rust-toolchain.toml`。
-- Godot 4.x 可执行文件，可放在 `PATH`，通过 `GDX_GODOT` 指定，或用 `--godot` 传入。
-- PowerShell，用于运行仓库内的 Windows E2E 脚本。
-- 只有运行 `gdx export build` 时才需要 Godot export templates 和 `export_presets.cfg`。
-
-## 项目状态
-
-`gdx` 目前处于 pre-1.0 阶段。当前重点是为 Godot 4.x 项目提供可靠的本地自动化闭环：
-
-- CLI：Rust 二进制 `gdx`。
-- Runtime 集成：安装到 `addons/gdx_*` 的 Godot addons。
-- 验证：脚本检查、Godot 测试、daemon 状态调用、输入和截图。
-- 调用模型：本地脚本和 AI agent。
-
-已知限制：
-
-- CLI 不会自行设计或迁移游戏。
-- `scene build` 接收 Godot 专用 JSON spec；调用方负责生成 spec。
-- daemon 绑定到 `127.0.0.1`，用于可信本地自动化。
-- `capture record` 会通过 Godot Movie Writer 启动新场景；即使使用 `--input-sequence`，它也不会录制当前 daemon session。
-- Touch 手势需要项目 daemon runtime 提供 `touch_sequence`；gdx 会报告 `daemon_runtime_outdated`，不会把 touch 降级成鼠标事件。
-- 导出依赖 Godot export preset 和已安装的 export templates。
-
-## 贡献与支持
-
-- 提交 PR 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-- 报告敏感问题前请阅读 [SECURITY.md](SECURITY.md)。
-- 提交安装或运行问题前，请先查看 [故障排查](docs/zh-CN/troubleshooting.md)。
-- 版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-
-## 许可证
-
-`gdx` 使用双许可证授权，可任选其一：
+## License
 
 - [MIT License](LICENSE-MIT)
 - [Apache License, Version 2.0](LICENSE-APACHE)

@@ -69,7 +69,6 @@ pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json
     let binary = ctx.locate_godot()?;
     let result = ctx.run_godot(GodotCommand {
         binary,
-        project: project.root.clone(),
         args: vec![
             "--path".to_string(),
             godot_path_string(&project.root),
@@ -102,9 +101,7 @@ pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json
                 "Godot completed but capture is missing or empty: {}",
                 capture.display()
             ),
-        )
-        .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
-        .with_artifact("stderr_log", godot_path_string(&result.stderr_log)));
+        ));
     }
 
     Ok(json!({
@@ -116,9 +113,7 @@ pub fn run_capture(ctx: &AppContext, args: &CaptureArgs) -> GdxResult<serde_json
         "frames": args.frames,
         "resolution": [args.width, args.height],
         "artifacts": {
-            "capture": godot_path_string(&capture),
-            "stdout_log": godot_path_string(&result.stdout_log),
-            "stderr_log": godot_path_string(&result.stderr_log)
+            "capture": godot_path_string(&capture)
         }
     }))
 }
@@ -169,7 +164,6 @@ pub fn run_record(ctx: &AppContext, args: &RecordArgs) -> GdxResult<serde_json::
     }
     let result = ctx.run_godot(GodotCommand {
         binary,
-        project: project.root.clone(),
         args: command_args,
         envs,
         timeout_secs: recording_timeout_secs(args.duration),
@@ -191,9 +185,7 @@ pub fn run_record(ctx: &AppContext, args: &RecordArgs) -> GdxResult<serde_json::
                 "Godot completed but recording is missing or empty: {}",
                 recording.display()
             ),
-        )
-        .with_artifact("stdout_log", godot_path_string(&result.stdout_log))
-        .with_artifact("stderr_log", godot_path_string(&result.stderr_log)));
+        ));
     }
 
     Ok(json!({
@@ -209,9 +201,7 @@ pub fn run_record(ctx: &AppContext, args: &RecordArgs) -> GdxResult<serde_json::
         "input_sequence": input_sequence.as_ref().map(|path| godot_path_string(path)),
         "input_events": input_events.as_ref().map(|events| events.len()),
         "artifacts": {
-            "recording": godot_path_string(&recording),
-            "stdout_log": godot_path_string(&result.stdout_log),
-            "stderr_log": godot_path_string(&result.stderr_log)
+            "recording": godot_path_string(&recording)
         }
     }))
 }

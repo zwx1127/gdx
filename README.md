@@ -11,10 +11,9 @@ When combined with a remote agent operator such as [`agent-relay`](https://githu
 ## What you can do
 
 - Create a new Godot project and configure its main scene.
-- Install the `gdx` runtime addons into an existing Godot project.
-- Update installed project addons to the runtime bundled with the current `gdx` CLI.
+- Install or update managed `gdx` runtime addons in an existing Godot project.
 - Set project settings, autoloads, and input map entries.
-- Copy, import, and inspect assets.
+- Import and inspect assets.
 - Create, attach, parse-check, and load-check GDScript files.
 - Create scenes directly or build scenes from JSON specs.
 - Start a local Godot daemon for live scene edits, input, method calls, state reads, and screenshots.
@@ -22,8 +21,9 @@ When combined with a remote agent operator such as [`agent-relay`](https://githu
 - Run Godot test scripts and multi-step verification specs.
 - Build exports through Godot export presets.
 - Pair with [`agent-relay`](https://github.com/zwx1127/agent-relay) to operate a local Codex plus `gdx` workflow remotely from chat.
+- Compose commands with standard shell pipes and redirection without project-local command history.
 
-All successful command output is JSON on stdout. Failures are JSON on stderr and may include Godot logs, diagnostics, and actionable suggestions.
+All successful command output is one compact JSON object on stdout. Failures end with a JSON object on stderr and may be preceded by progress NDJSON. `doctor` reports the actual gdx executable, version, and build commit.
 
 ## Quick start
 
@@ -56,12 +56,20 @@ target\debug\gdx.exe --project .\demo project inspect
 
 Use `--project <dir>` on every command that operates on an existing Godot project.
 
+Use PowerShell pipes and redirection directly when output must be retained:
+
+```powershell
+gdx --project .\demo --progress ndjson script check-all 1>result.json 2>progress.ndjson
+```
+
+gdx does not persist command results or one-shot logs in the game project.
+
 ## Common workflows
 
 Attach to an existing project:
 
 ```powershell
-gdx --project C:\Path\To\GodotProject project install
+gdx --project C:\Path\To\GodotProject project update
 gdx --project C:\Path\To\GodotProject project inspect
 ```
 
@@ -81,6 +89,8 @@ gdx --project .\demo script check-all
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
 ```
 
+Run `asset import` when the project workflow knows importable assets changed. Daemon startup does not scan for or infer project-specific pending imports.
+
 Use the daemon for runtime edits and screenshots:
 
 ```powershell
@@ -90,15 +100,15 @@ gdx --project .\demo node create --parent / --type Label --name Title
 gdx --project .\demo node set --node /Title --property text --value "Hello from gdx"
 gdx --project .\demo node set --node /Title --property position --vec2 40 40
 gdx --project .\demo scene save
-gdx --project .\demo capture daemon --out .\demo\.gdx\capture.png
+gdx --project .\demo capture daemon --out .\artifacts\capture.png
 gdx --project .\demo daemon stop
 ```
 
 Record a short AVI from a freshly launched scene to review animation timing:
 
 ```powershell
-gdx --project .\demo capture record --out .\demo\.gdx\recording.avi --duration 3 --fps 60
-gdx --project .\demo capture record --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
+gdx --project .\demo capture record --out .\artifacts\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --out .\artifacts\gesture.avi --duration 3 --fps 60 --input-sequence .\touch-sequence.json
 ```
 
 `--input-sequence` replays the same touch sequence JSON used by `input sequence` in the fresh scene launched for Movie Writer recording.
@@ -106,7 +116,7 @@ gdx --project .\demo capture record --out .\demo\.gdx\gesture.avi --duration 3 -
 Run a multi-step verification spec:
 
 ```powershell
-gdx --project .\demo verify --spec .\demo\.gdx\verify.json
+gdx --project .\demo verify --spec .\demo\verify.json
 ```
 
 ```json
@@ -117,7 +127,7 @@ gdx --project .\demo verify --spec .\demo\.gdx\verify.json
   "steps": [
     { "call": { "target": "/", "method": "gdx_start_run", "args": [] } },
     { "state": { "target": "/", "method": "gdx_state" } },
-    { "capture": { "out": ".gdx/capture.png", "frames": 10 } }
+    { "capture": { "out": "artifacts/capture.png", "frames": 10 } }
   ]
 }
 ```
@@ -157,6 +167,7 @@ Known limitations:
 - The CLI does not design or migrate games by itself.
 - `scene build` consumes a Godot-specific JSON spec; callers are responsible for generating the spec.
 - The daemon binds to `127.0.0.1` and is intended for trusted local automation.
+- Visual baselines, comparison metrics, thresholds, masks, and product acceptance rules belong to the game project; gdx captures artifacts but does not judge them.
 - `capture record` launches a fresh scene with Godot Movie Writer; it does not record the current daemon session, including when `--input-sequence` is used.
 - Touch gestures require a project daemon runtime that advertises `touch_sequence`; gdx reports `daemon_runtime_outdated` instead of downgrading touch input to mouse events.
 - Export requires Godot export presets and installed export templates.

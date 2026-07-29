@@ -13,7 +13,7 @@ Report privately through GitHub Security Advisories when available. If advisorie
 ## Security model
 
 - `gdx` is intended to run on a trusted local machine against trusted Godot projects.
-- The daemon binds to `127.0.0.1` and uses per-session state under `.gdx/daemon/`.
+- The daemon binds to `127.0.0.1` and keeps per-project session state under the operating system temporary directory.
 - Commands can copy assets, create files, edit scenes, run Godot, execute project scripts, capture screenshots, and build exports.
 - Godot project code is treated as executable code. Only run `gdx` on projects you are willing to execute locally.
 - Debug logs and diagnostics may include local paths, Godot output, script errors, and project structure.
@@ -23,7 +23,7 @@ Report privately through GitHub Security Advisories when available. If advisorie
 Do not publish:
 
 - `.env` or other local configuration with secrets.
-- `.gdx/daemon/session.json`.
+- Active daemon session files or copied session tokens from the operating system temporary directory.
 - Godot logs containing private paths or project details.
 - Generated screenshots of private projects.
 - Proprietary assets copied into a test project.

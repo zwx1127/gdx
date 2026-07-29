@@ -15,7 +15,7 @@ if (-not $WorkDir) {
 }
 
 $project = Join-Path $WorkDir "demo"
-$capture = Join-Path $project ".gdx\capture.png"
+$capture = Join-Path $project "artifacts\capture.png"
 $testDir = Join-Path $project "tests"
 $specPath = Join-Path $WorkDir "hello-2d.json"
 $testPath = Join-Path $testDir "smoke_test.gd"

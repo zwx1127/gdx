@@ -147,17 +147,13 @@ pub fn run_attach(ctx: &AppContext, args: &AttachArgs) -> GdxResult<serde_json::
 pub fn run_check(ctx: &AppContext, args: &CheckArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
     validate_res_path("script_path", &args.script_path)?;
-    let result = run_strict_script_check(ctx, &project.root, &args.script_path, 60)?;
+    run_strict_script_check(ctx, &project.root, &args.script_path, 60)?;
     Ok(json!({
         "ok": true,
         "command": "script.check",
         "project": godot_path_string(&project.root),
         "script": args.script_path,
-        "check": "strict_parse",
-        "artifacts": {
-            "stdout_log": godot_path_string(&result.stdout_log),
-            "stderr_log": godot_path_string(&result.stderr_log)
-        }
+        "check": "strict_parse"
     }))
 }
 
@@ -185,9 +181,7 @@ pub fn run_check_all(ctx: &AppContext, args: &CheckAllArgs) -> GdxResult<serde_j
         validate_res_path("--exclude", excluded)?;
     }
     let project = ctx.project()?;
-    let discovery_started = Instant::now();
     let scripts = collect_scripts(&project.root, &args.root, &args.excludes)?;
-    let discovery_ms = discovery_started.elapsed().as_millis();
     let total = scripts.len();
     let auto_jobs = std::thread::available_parallelism()
         .map(|value| value.get())
@@ -275,23 +269,13 @@ pub fn run_check_all(ctx: &AppContext, args: &CheckAllArgs) -> GdxResult<serde_j
             })));
     }
 
-    let mut checked = Vec::new();
+    let mut checked_count = 0usize;
     let mut failures = Vec::new();
     let mut first_error = None;
     for (index, result) in results.iter_mut().enumerate() {
         let script = &scripts[index];
         match result.take().expect("every script result must be present") {
-            Ok(run) => checked.push(json!({
-                "script": script,
-                "run_id": run.run_id,
-                "child_pid": run.child_pid,
-                "duration_ms": run.duration_ms,
-                "log_summary": run.log_summary.filtered(ctx.warnings),
-                "artifacts": {
-                    "stdout_log": godot_path_string(&run.stdout_log),
-                    "stderr_log": godot_path_string(&run.stderr_log)
-                }
-            })),
+            Ok(_) => checked_count += 1,
             Err(error) => {
                 failures.push(error_json(script, &error));
                 if first_error.is_none() {
@@ -319,20 +303,11 @@ pub fn run_check_all(ctx: &AppContext, args: &CheckAllArgs) -> GdxResult<serde_j
         "check": "strict_parse",
         "root": args.root,
         "jobs": jobs,
-        "timeouts": {
-            "script_secs": args.script_timeout_secs,
-            "total_secs": args.timeout_secs,
-        },
         "counts": {
             "discovered": total,
-            "checked": checked.len(),
+            "checked": checked_count,
             "failed": 0,
-        },
-        "timing": {
-            "discovery_ms": discovery_ms,
-        },
-        "count": checked.len(),
-        "checked": checked,
+        }
     }))
 }
 
@@ -350,7 +325,11 @@ pub fn run_load_check(ctx: &AppContext, args: &LoadCheckArgs) -> GdxResult<serde
         "command": "script.load-check",
         "project": godot_path_string(&project.root),
         "check": "load_only",
-        "result": result
+        "root": args.root,
+        "counts": {
+            "checked": result.get("count").and_then(serde_json::Value::as_u64).unwrap_or(0),
+            "failed": 0
+        }
     }))
 }
 
@@ -374,7 +353,6 @@ fn run_strict_script_check_with_binary(
 ) -> GdxResult<godot::GodotRunResult> {
     let result = ctx.run_godot(GodotCommand {
         binary,
-        project: project_root.to_path_buf(),
         args: vec![
             "--headless".to_string(),
             "--path".to_string(),
@@ -451,7 +429,6 @@ fn error_json(script: &str, error: &GdxError) -> serde_json::Value {
         "message": error.message,
         "stage": error.context.stage,
         "child_pid": error.context.child_pid,
-        "artifacts": error.context.artifacts,
         "details": error.context.details,
     })
 }

@@ -114,9 +114,7 @@ Invoke-Native $Bin --project $Work setting set --section application --key run/m
 try {
     $Start = Invoke-Json $Bin @Common --project $Work daemon start --width 400 --height 300 --restart
     if ($Start.ok -ne $true) { throw "daemon start did not return ok JSON" }
-    if ($Start.capabilities.methods -notcontains "touch_sequence") { throw "daemon capabilities missing touch_sequence" }
-    if ($Start.capabilities.input.touch -ne $true) { throw "daemon capabilities missing touch input flag" }
-    if ($Start.capabilities.input.multi_touch -ne $true) { throw "daemon capabilities missing multi_touch input flag" }
+    if ($Start.runtime.status -ne "current") { throw "daemon start did not report current runtime status" }
 
     Invoke-Native $Bin --project $Work input tap --position 120 80 --frames 1
     $AfterTap = Invoke-Json $Bin --project $Work state get --target "/" --method gdx_state
@@ -158,7 +156,7 @@ try {
 {
   "steps": [
     { "input_tap": { "position": [160, 120], "frames": 1 } },
-    { "input_swipe": { "from": [160, 120], "to": [200, 160], "steps": 2, "frames": 1 } },
+    { "input_drag": { "from": [160, 120], "to": [200, 160], "steps": 2, "frames": 1 } },
     { "input_pinch": { "center": [120, 120], "start_distance": 60, "end_distance": 30, "steps": 2, "frames": 1 } },
     { "input_touch_sequence": { "events": [
       { "kind": "touch", "index": 4, "position": [10, 10], "pressed": true },
@@ -169,7 +167,7 @@ try {
 }
 '@
     $Verify = Invoke-Json $Bin --project $Work verify --spec $VerifySpec
-    $VerifyState = $Verify.results[4].result.state
+    $VerifyState = $Verify.steps[4].result.state
     if ([int]$VerifyState.presses -ne 10) { throw "Expected verify touch steps to add five presses" }
     if ([int]$VerifyState.releases -ne 10) { throw "Expected verify touch steps to add five releases" }
 }

@@ -102,17 +102,14 @@ func _script_check_all(params: Dictionary) -> void:
     var root_path := str(params.get("root", "res://"))
     var scripts: Array = []
     _collect_scripts(root_path, scripts)
-    var checked: Array = []
     var failed: Array = []
     for path in scripts:
         var loaded = load(path)
-        checked.append(path)
         if loaded == null:
             failed.append(path)
     _ok({
-        "checked": checked,
         "failed": failed,
-        "count": checked.size(),
+        "count": scripts.size(),
         "ok": failed.is_empty(),
     }, 0 if failed.is_empty() else 1)
 

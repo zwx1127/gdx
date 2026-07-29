@@ -44,11 +44,11 @@ target\debug\gdx.exe --project .\demo project inspect
 ## 接入已有项目
 
 ```powershell
-gdx --project C:\Path\To\Game project install
+gdx --project C:\Path\To\Game project update
 gdx --project C:\Path\To\Game project inspect
 ```
 
-`project install` 会复制 scene automation 和 daemon 工作流需要的 `addons/gdx_*` runtime 文件。它不会重写你的游戏架构。
+`project update` 会安装缺失的 `addons/gdx_*` runtime，并更新过期的管理文件。它不会重写游戏架构或 `.gitignore`。
 
 升级或重新构建 `gdx` 后，用下面的命令刷新已接入项目：
 
@@ -62,8 +62,8 @@ gdx --project C:\Path\To\Game project update
 ```powershell
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
-gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
-gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\artifacts\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\artifacts\recording.avi --duration 3 --fps 60
 ```
 
 如果项目已经配置 main scene，`capture run` 和 `capture record` 都可以省略 `--scene`。`capture record` 会通过 Godot Movie Writer 启动场景并写出 AVI 录制文件。增加 `--input-sequence <json>` 可以在这个 fresh scene 里回放 touch 事件并录制手势过程。

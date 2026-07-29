@@ -7,7 +7,6 @@ pub(crate) mod init;
 pub(crate) mod play;
 pub(crate) mod project_cmd;
 pub(crate) mod resource;
-pub(crate) mod runs;
 pub(crate) mod scene;
 pub(crate) mod session;
 pub(crate) mod test_cmd;
@@ -18,8 +17,8 @@ use serde_json::Value;
 use crate::cli::{
     AssetSubcommand, AutoloadSubcommand, CallSubcommand, CaptureSubcommand, Cli, Commands,
     DaemonSubcommand, ExportSubcommand, InputMapSubcommand, InputSubcommand, NodeSubcommand,
-    ProjectSubcommand, ResourceSubcommand, RunsSubcommand, SceneSubcommand, ScriptSubcommand,
-    SettingSubcommand, StateSubcommand, TestSubcommand,
+    ProjectSubcommand, ResourceSubcommand, SceneSubcommand, ScriptSubcommand, SettingSubcommand,
+    StateSubcommand, TestSubcommand,
 };
 use crate::context::AppContext;
 use crate::error::GdxResult;
@@ -27,15 +26,10 @@ use crate::progress::ProgressReporter;
 
 pub fn run(cli: &Cli, progress: ProgressReporter) -> GdxResult<Value> {
     let ctx = AppContext::from_cli(cli, progress)?;
-    let mut result = match &cli.command {
+    match &cli.command {
         Commands::Doctor => env::run(&ctx),
-        Commands::Runs(command) => match &command.command {
-            RunsSubcommand::List(args) => runs::run_list(&ctx, args),
-            RunsSubcommand::Prune(args) => runs::run_prune(&ctx, args),
-        },
         Commands::Project(command) => match &command.command {
             ProjectSubcommand::Create(args) => init::run_create(&ctx, args),
-            ProjectSubcommand::Install(args) => project_cmd::run_install(&ctx, args),
             ProjectSubcommand::Inspect(args) => project_cmd::run_inspect(&ctx, args),
             ProjectSubcommand::Update(args) => project_cmd::run_update(&ctx, args),
         },
@@ -55,7 +49,6 @@ pub fn run(cli: &Cli, progress: ProgressReporter) -> GdxResult<Value> {
             InputMapSubcommand::List(args) => project_cmd::run_input_list(&ctx, args),
         },
         Commands::Asset(command) => match &command.command {
-            AssetSubcommand::Copy(args) => asset::run_copy(&ctx, args),
             AssetSubcommand::Import(args) => asset::run_import(&ctx, args),
             AssetSubcommand::Inspect(args) => asset::run_inspect(&ctx, args),
         },
@@ -88,7 +81,6 @@ pub fn run(cli: &Cli, progress: ProgressReporter) -> GdxResult<Value> {
             InputSubcommand::Touch(args) => session::run_touch(&ctx, args),
             InputSubcommand::Tap(args) => session::run_tap(&ctx, args),
             InputSubcommand::Drag(args) => session::run_drag(&ctx, args),
-            InputSubcommand::Swipe(args) => session::run_swipe(&ctx, args),
             InputSubcommand::Pinch(args) => session::run_pinch(&ctx, args),
             InputSubcommand::Sequence(args) => session::run_sequence(&ctx, args),
             InputSubcommand::Activate(args) => session::run_activate(&ctx, args),
@@ -115,42 +107,7 @@ pub fn run(cli: &Cli, progress: ProgressReporter) -> GdxResult<Value> {
             ExportSubcommand::Build(args) => export::run_build(&ctx, args),
         },
         Commands::Verify(args) => verify::run(&ctx, args),
-    };
-    let cleanup = ctx.finalize_runs();
-    match &mut result {
-        Ok(value) if value.is_object() => {
-            value["cleanup"] = cleanup;
-            value["log_summary"] = ctx.log_summary();
-        }
-        Err(error) => {
-            let mut log_summary = ctx.log_summary();
-            let aggregate_is_empty = log_summary
-                .get("errors")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                == 0
-                && log_summary
-                    .get("warnings")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
-                    == 0;
-            if aggregate_is_empty {
-                if let Some(summary) = error
-                    .context
-                    .details
-                    .as_ref()
-                    .and_then(|details| details.get("diagnostics"))
-                    .and_then(|diagnostics| diagnostics.get("log_summary"))
-                {
-                    log_summary = summary.clone();
-                }
-            }
-            error.insert_detail("cleanup", cleanup);
-            error.insert_detail("log_summary", log_summary);
-        }
-        _ => {}
     }
-    result
 }
 
 #[cfg(test)]
@@ -200,6 +157,7 @@ mod tests {
         ] {
             let cli = parses(&args);
 
+            assert_eq!(cli.command_name(), "project.update");
             assert!(matches!(cli.command, Commands::Project(_)));
         }
     }
@@ -228,17 +186,6 @@ mod tests {
                 "ui_accept",
                 "--keycode",
                 "32",
-            ],
-            vec![
-                "gdx",
-                "--project",
-                "demo",
-                "asset",
-                "copy",
-                "--from",
-                "a.png",
-                "--to",
-                "res://assets/a.png",
             ],
             vec![
                 "gdx",
@@ -443,19 +390,6 @@ mod tests {
                 "--project",
                 "demo",
                 "input",
-                "swipe",
-                "--from",
-                "10",
-                "20",
-                "--to",
-                "120",
-                "240",
-            ],
-            vec![
-                "gdx",
-                "--project",
-                "demo",
-                "input",
                 "pinch",
                 "--center",
                 "100",
@@ -528,15 +462,13 @@ mod tests {
     }
 
     #[test]
-    fn parses_reliability_options_and_file_arguments() {
+    fn parses_reliability_options_and_arguments() {
         let cli = parses(&[
             "gdx",
             "--project",
             "demo",
             "--progress",
             "ndjson",
-            "--warnings",
-            "error",
             "--godot-standard",
             "standard.exe",
             "script",
@@ -564,7 +496,6 @@ mod tests {
         }
 
         for args in [
-            vec!["gdx", "--project", "demo", "runs", "prune", "--apply"],
             vec![
                 "gdx",
                 "--project",
@@ -585,8 +516,10 @@ mod tests {
                 "/",
                 "--method",
                 "start",
-                "--args-file",
-                "args.json",
+                "--arg",
+                "river bridge",
+                "--arg",
+                "中文",
             ],
             vec![
                 "gdx",
@@ -604,10 +537,34 @@ mod tests {
         ] {
             parses(&args);
         }
+
+        let cli = parses(&[
+            "gdx",
+            "--project",
+            "demo",
+            "call",
+            "invoke",
+            "--target",
+            "/",
+            "--method",
+            "start",
+            "--arg",
+            "",
+            "--arg",
+            "true",
+        ]);
+        match cli.command {
+            Commands::Call(command) => match command.command {
+                CallSubcommand::Invoke(args) => {
+                    assert_eq!(args.arg, vec!["", "true"]);
+                }
+            },
+            _ => panic!("expected call invoke"),
+        }
     }
 
     #[test]
-    fn parses_input_send_pressed_values_and_release_alias() {
+    fn parses_input_send_pressed_values() {
         let pressed_false = parses(&[
             "gdx",
             "--project",
@@ -623,7 +580,6 @@ mod tests {
             Commands::Input(command) => match command.command {
                 InputSubcommand::Send(args) => {
                     assert!(!args.pressed);
-                    assert!(!args.release);
                 }
                 _ => panic!("expected input send"),
             },
@@ -645,7 +601,6 @@ mod tests {
             Commands::Input(command) => match command.command {
                 InputSubcommand::Send(args) => {
                     assert!(args.pressed);
-                    assert!(!args.release);
                 }
                 _ => panic!("expected input send"),
             },
@@ -666,28 +621,6 @@ mod tests {
             Commands::Input(command) => match command.command {
                 InputSubcommand::Send(args) => {
                     assert!(args.pressed);
-                    assert!(!args.release);
-                }
-                _ => panic!("expected input send"),
-            },
-            _ => panic!("expected input command"),
-        }
-
-        let release = parses(&[
-            "gdx",
-            "--project",
-            "demo",
-            "input",
-            "send",
-            "--mouse-button",
-            "1",
-            "--release",
-        ]);
-        match release.command {
-            Commands::Input(command) => match command.command {
-                InputSubcommand::Send(args) => {
-                    assert!(args.pressed);
-                    assert!(args.release);
                 }
                 _ => panic!("expected input send"),
             },
@@ -702,12 +635,10 @@ mod tests {
             "send",
             "--mouse-button",
             "1",
-            "--pressed",
-            "true",
             "--release",
         ])
         .unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
     #[test]
     fn rejects_removed_v1_shapes() {

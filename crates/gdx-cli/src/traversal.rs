@@ -18,23 +18,6 @@ pub fn is_generated_path(project: &Path, path: &Path) -> bool {
     })
 }
 
-pub fn is_gdx_managed_addon(project: &Path, path: &Path) -> bool {
-    let Ok(relative) = path.strip_prefix(project) else {
-        return false;
-    };
-    let mut components = relative
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(name) => name.to_str(),
-            _ => None,
-        });
-    components.next() == Some("addons")
-        && matches!(
-            components.next(),
-            Some("gdx_tools" | "gdx_runtime" | "gdx_daemon")
-        )
-}
-
 pub fn is_explicitly_excluded(
     project: &Path,
     path: &Path,
@@ -61,10 +44,6 @@ mod tests {
         assert!(!is_generated_path(
             project,
             Path::new("D:/Game/addons/gdx_tools/automation.gd")
-        ));
-        assert!(is_gdx_managed_addon(
-            project,
-            Path::new("D:/Game/addons/gdx_tools")
         ));
     }
 }

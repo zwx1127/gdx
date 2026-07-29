@@ -102,26 +102,37 @@ if ($ServerText -match '(?m)^\s+"touch_sequence",\s*$') {
 [System.IO.File]::WriteAllText($DaemonServer, $ServerText, [System.Text.UTF8Encoding]::new($false))
 
 try {
-    $Start = Invoke-Json $Bin @Common --project $Work daemon start --width 320 --height 240 --restart
-    if ($Start.ok -ne $true) { throw "daemon start did not return ok JSON" }
-    if ($Start.runtime_status -ne "outdated") { throw "Expected daemon start runtime_status outdated, got $($Start.runtime_status)" }
-    if ($Start.methods -contains "touch_sequence") { throw "Outdated fixture unexpectedly advertised touch_sequence" }
-    if (-not (($Start.warnings -join "`n") -match "project update --check")) {
-        throw "daemon start warning did not mention project update --check"
+    $ErrorJson = Invoke-FailingJson $Bin @Common --project $Work daemon start --width 320 --height 240 --restart
+    if ($ErrorJson.error -ne "daemon_runtime_outdated") { throw "Expected daemon_runtime_outdated, got $($ErrorJson.error)" }
+    if ($ErrorJson.stage -ne "runtime_preflight") { throw "Expected runtime_preflight stage, got $($ErrorJson.stage)" }
+    if ($ErrorJson.details.managed_runtime.status -ne "outdated") {
+        throw "Expected managed runtime status outdated, got $($ErrorJson.details.managed_runtime.status)"
     }
+    if ($ErrorJson.details.managed_runtime.compatible -ne $false) {
+        throw "Outdated managed runtime unexpectedly reported compatible"
+    }
+    if ($ErrorJson.suggestion -notmatch "project update") { throw "Error suggestion did not mention project update" }
 
     $Status = Invoke-Json $Bin --project $Work daemon status
-    if ($Status.running -ne $true) { throw "Expected daemon status to be running" }
-    if ($Status.runtime_status -ne "outdated") { throw "Expected daemon status runtime_status outdated, got $($Status.runtime_status)" }
-    if (-not (($Status.warnings -join "`n") -match "project update --check")) {
-        throw "daemon status warning did not mention project update --check"
+    if ($Status.running -ne $false) { throw "Preflight failure unexpectedly left a daemon running" }
+    if ($Status.runtime.status -ne "not_running") { throw "daemon status did not report not_running" }
+
+    $Check = Invoke-Json $Bin --project $Work project update --check
+    if ($Check.up_to_date -ne $false) { throw "project update --check did not detect the modified runtime" }
+    if (@($Check.changes | Where-Object { $_.status_before -eq "outdated" }).Count -lt 1) {
+        throw "project update --check did not report an outdated managed file"
     }
 
-    $ErrorJson = Invoke-FailingJson $Bin --project $Work input tap --position 10 10
-    if ($ErrorJson.error -ne "daemon_runtime_outdated") { throw "Expected daemon_runtime_outdated, got $($ErrorJson.error)" }
-    if ($ErrorJson.details.requested_rpc_method -ne "touch_sequence") { throw "Expected requested_rpc_method touch_sequence" }
-    if ($ErrorJson.details.capabilities.methods -contains "touch_sequence") { throw "Error capabilities unexpectedly advertised touch_sequence" }
-    if ($ErrorJson.suggestion -notmatch "project update --check") { throw "Error suggestion did not mention project update --check" }
+    $Update = Invoke-Json $Bin --project $Work project update
+    if ($Update.up_to_date -ne $true) { throw "project update did not restore the managed runtime" }
+
+    $Start = Invoke-Json $Bin @Common --project $Work daemon start --width 320 --height 240 --restart
+    if ($Start.ok -ne $true) { throw "daemon start did not return ok JSON after update" }
+    if ($Start.runtime.status -ne "current") { throw "Expected daemon runtime status current, got $($Start.runtime.status)" }
+    if ($Start.health.project_healthy -ne $true) { throw "Updated daemon did not pass project health" }
+
+    $Tap = Invoke-Json $Bin --project $Work input tap --position 10 10
+    if ($Tap.ok -ne $true) { throw "Touch input failed after restoring the managed runtime" }
 }
 finally {
     & $Bin --project $Work daemon stop --force

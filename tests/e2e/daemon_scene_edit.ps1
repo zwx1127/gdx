@@ -44,7 +44,7 @@ $Common = @("--godot", $Godot)
 
 [void](New-Item -ItemType Directory -Force -Path $Work)
 Set-Content -LiteralPath (Join-Path $Work "project.godot") -Encoding UTF8 -Value "config_version=5`n`n[application]`nconfig/name=`"existing`"`n"
-Invoke-Native $Bin --project $Work project install
+Invoke-Native $Bin --project $Work project update
 Invoke-Native $Bin --project $Work project inspect
 Invoke-Native $Bin @Common --project $Work scene create `
     --out "res://scenes/main.tscn" `

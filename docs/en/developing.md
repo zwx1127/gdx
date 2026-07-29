@@ -5,7 +5,7 @@
 ## Repository layout
 
 - `crates/gdx-cli/src/`: CLI commands, context, Godot process handling, daemon RPC, diagnostics, and JSON output.
-- `crates/gdx-cli/resources/addons/`: Godot scripts installed into target projects by `project install`.
+- `crates/gdx-cli/resources/addons/`: Godot scripts installed or updated in target projects by `project update`.
 - `docs/`: user, agent, and developer documentation.
 - `skills/gdx-game-dev/`: Codex skill and compact command references.
 - `tests/e2e/`: PowerShell scripts that create temporary Godot projects and exercise real workflows.
@@ -36,7 +36,7 @@ Keep the CLI contract stable:
 - Failures are JSON on stderr.
 - Error codes should be stable, narrow, and useful to automation.
 - Include `suggestion` text when the user or agent can take a clear next action.
-- Include Godot stdout/stderr log artifact paths when a Godot process was started.
+- Keep success payloads compact. One-shot Godot logs are temporary; return bounded diagnostics only on failure.
 
 Update:
 

@@ -4,10 +4,13 @@ use std::process::Command;
 
 use serde_json::json;
 
+use crate::build_info;
+use crate::commands::addons;
 use crate::context::AppContext;
 use crate::error::{GdxError, GdxResult};
 use crate::godot::{
-    binary_is_dotnet, find_dotnet_on_path, find_standard_on_path, project_has_csharp, GodotCommand,
+    binary_is_dotnet, find_dotnet_on_path, find_standard_on_path, project_language_mode,
+    GodotCommand, ProjectLanguageMode,
 };
 use crate::project::godot_path_string;
 
@@ -22,7 +25,10 @@ pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
     }
 
     let project_root = ctx.project.as_deref();
-    let has_csharp = project_root.map(project_has_csharp).unwrap_or(false);
+    let language_mode = project_root
+        .map(project_language_mode)
+        .unwrap_or(ProjectLanguageMode::Unknown);
+    let has_csharp = language_mode.requires_dotnet();
     let project_kind = if project_root.is_none() {
         "unknown"
     } else if has_csharp {
@@ -48,6 +54,13 @@ pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
             "The project contains C# files but the selected Godot build has no .NET support",
         )
         .with_stage("environment")
+        .with_details(json!({
+            "project_language_mode": language_mode.as_str(),
+            "godot_distribution": "standard",
+            "dotnet_required": true,
+            "dotnet_sdk_detected": !sdk.versions.is_empty(),
+            "diagnostic_blocking": true,
+        }))
         .with_suggestion(
             "Configure --godot-dotnet or GDX_GODOT_DOTNET with a .NET-enabled Godot build.",
         ));
@@ -62,16 +75,27 @@ pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
             "installed_sdks": sdk.versions,
             "dotnet_path": sdk.path,
             "required": ">=8.0",
+            "project_language_mode": language_mode.as_str(),
+            "godot_distribution": "mono",
+            "dotnet_required": true,
+            "dotnet_sdk_detected": !sdk.versions.is_empty(),
+            "diagnostic_blocking": true,
         }))
         .with_suggestion("Install a current 64-bit .NET SDK, then rerun gdx doctor."));
     }
 
     let mut warnings = Vec::new();
+    let mut diagnostics = Vec::new();
     if project_root.is_some() && !has_csharp && dotnet_build && !has_dotnet_8 {
-        warnings.push(
-            "GDScript-only project is using .NET-enabled Godot without an installed SDK; configure standard Godot to avoid unnecessary .NET initialization."
-                .to_string(),
-        );
+        let message = "GDScript-only project is using .NET-enabled Godot without an installed SDK; configure standard Godot to avoid unnecessary .NET initialization.";
+        warnings.push(message.to_string());
+        diagnostics.push(json!({
+            "source": "environment",
+            "severity": "warning",
+            "code": "dotnet_sdk_missing",
+            "message": message,
+            "blocking": false,
+        }));
     }
 
     let os = std::env::consts::OS;
@@ -96,15 +120,20 @@ pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
         .clone()
         .or_else(find_dotnet_on_path)
         .map(|path| godot_path_string(&path));
+    let managed_runtime = project_root
+        .map(addons::inspect_daemon_runtime)
+        .transpose()?;
 
-    Ok(json!({
+    let mut result = json!({
         "ok": true,
         "command": "doctor",
         "project": {
             "path": project_root.map(godot_path_string),
             "kind": project_kind,
+            "language_mode": language_mode.as_str(),
             "has_csharp": has_csharp,
         },
+        "diagnostics": diagnostics,
         "godot": {
             "path": godot_path_string(&binary),
             "version": version,
@@ -115,6 +144,7 @@ pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
             "dotnet": dotnet_candidate,
             "generic": std::env::var("GDX_GODOT").ok(),
         },
+        "managed_runtime": managed_runtime,
         "dotnet": {
             "path": sdk.path,
             "installed_sdks": sdk.versions,
@@ -133,16 +163,17 @@ pub fn run(ctx: &AppContext) -> GdxResult<serde_json::Value> {
             "GDX_GODOT_STANDARD": std::env::var("GDX_GODOT_STANDARD").ok(),
             "GDX_GODOT_DOTNET": std::env::var("GDX_GODOT_DOTNET").ok(),
         }
-    }))
+    });
+    build_info::enrich(&mut result);
+    Ok(result)
 }
 
 fn godot_version(ctx: &AppContext, binary: &Path) -> GdxResult<String> {
-    let Some(project) = ctx.project.as_deref() else {
+    if ctx.project.is_none() {
         return crate::godot::run_version(binary, 10, &ctx.progress);
-    };
+    }
     let result = ctx.run_godot(GodotCommand {
         binary: binary.to_path_buf(),
-        project: project.to_path_buf(),
         args: vec!["--version".to_string()],
         envs: Vec::new(),
         timeout_secs: 10,

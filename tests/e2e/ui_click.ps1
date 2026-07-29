@@ -103,18 +103,15 @@ if ($SceneText -notmatch "script = ExtResource") { throw "Saved scene does not a
 try {
     $Start = Invoke-Json $Bin @Common --project $Work daemon start --width 400 --height 300 --restart
     if ($Start.ok -ne $true) { throw "daemon start did not return ok JSON" }
-    if ($Start.capabilities.status -ne "known") { throw "daemon start did not report known capabilities" }
-    if ($Start.runtime_status -ne "known") { throw "daemon start did not promote known runtime status" }
+    if ($Start.runtime.status -ne "current") { throw "daemon start did not report current runtime status" }
     if ([int]$Start.pid -le 0) { throw "daemon start did not promote pid" }
     if ([int]$Start.port -le 0) { throw "daemon start did not promote port" }
-    if ($Start.methods -notcontains "click_node") { throw "daemon start did not promote methods" }
-    if ($Start.capabilities.methods -notcontains "click_node") { throw "daemon capabilities missing click_node" }
-    if ($Start.capabilities.methods -notcontains "activate_node") { throw "daemon capabilities missing activate_node" }
+    if ($Start.PSObject.Properties.Name -contains "capabilities") { throw "daemon start exposed duplicate capabilities" }
+    if ($Start.PSObject.Properties.Name -contains "token") { throw "daemon start exposed its token" }
 
     $Status = Invoke-Json $Bin --project $Work daemon status
     if ($Status.running -ne $true) { throw "Expected daemon status to be running" }
-    if ($Status.capabilities.status -ne "known") { throw "daemon status did not report known capabilities" }
-    if ($Status.runtime_status -ne "known") { throw "daemon status did not promote known runtime status" }
+    if ($Status.runtime.status -ne "current") { throw "daemon status did not report current runtime status" }
     if ($Status.scene -ne "res://scenes/main.tscn") { throw "daemon status did not promote scene" }
 
     $Tree = Invoke-Json $Bin --project $Work scene tree --include-script --include-groups --include-methods
@@ -151,8 +148,8 @@ try {
 }
 '@
     $Verify = Invoke-Json $Bin --project $Work verify --spec $VerifySpec
-    if ($Verify.results[0].result.method -ne "gdx_state") { throw "Expected verify state step to default to gdx_state" }
-    if ([int]$Verify.results[2].result.state.clicks -ne 4) { throw "Expected verify input step to activate button" }
+    if ($Verify.steps[0].result.method -ne "gdx_state") { throw "Expected verify state step to default to gdx_state" }
+    if ([int]$Verify.steps[2].result.state.clicks -ne 4) { throw "Expected verify input step to activate button" }
 }
 finally {
     & $Bin --project $Work daemon stop --force

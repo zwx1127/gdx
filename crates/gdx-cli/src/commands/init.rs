@@ -18,9 +18,6 @@ pub struct CreateArgs {
 
     #[arg(long)]
     pub name: String,
-
-    #[arg(long)]
-    pub force: bool,
 }
 
 pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::Value> {
@@ -38,13 +35,12 @@ pub fn run_create(ctx: &AppContext, args: &CreateArgs) -> GdxResult<serde_json::
             .read_dir()
             .map(|mut it| it.next().is_some())
             .unwrap_or(true)
-        && !args.force
     {
         return Err(GdxError::user(
             "target_not_empty",
             format!("Target directory is not empty: {}", target.display()),
         )
-        .with_suggestion("Pass --force to write gdx scaffold files into the existing directory."));
+        .with_suggestion("Use `gdx project update` for an existing Godot project."));
     }
 
     ensure_dir(&target)?;
@@ -124,7 +120,6 @@ mod tests {
         let args = CreateArgs {
             path: path.clone(),
             name: "hello".to_string(),
-            force: false,
         };
 
         run_create(&ctx, &args).unwrap();
@@ -138,6 +133,10 @@ mod tests {
         assert!(path.join("addons/gdx_tools/automation.gd").is_file());
         assert!(path.join("addons/gdx_runtime/capture_runner.gd").is_file());
         assert!(path.join("addons/gdx_daemon/daemon_server.gd").is_file());
+        assert_eq!(
+            fs::read_to_string(path.join(".gitignore")).unwrap(),
+            ".godot/\n"
+        );
         assert!(!path.join("scripts/main.gd").exists());
         assert!(!path.join("assets/icon.svg").exists());
         assert!(!path.join("scenes/.gitkeep").exists());
@@ -146,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn init_rejects_non_empty_target_without_force() {
+    fn init_rejects_non_empty_target() {
         let path = temp_project("non_empty");
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
@@ -155,7 +154,6 @@ mod tests {
         let args = CreateArgs {
             path: path.clone(),
             name: "hello".to_string(),
-            force: false,
         };
 
         let err = run_create(&ctx, &args).unwrap_err();

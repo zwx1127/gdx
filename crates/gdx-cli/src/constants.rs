@@ -10,4 +10,4 @@ pub const GDX_DAEMON_SERVER_RES: &str = "res://addons/gdx_daemon/daemon_server.t
 pub const GDX_TOOLS_CREATE_SCENE_RES: &str = "res://addons/gdx_tools/create_scene.gd";
 pub const GDX_TOOLS_AUTOMATION_RES: &str = "res://addons/gdx_tools/automation.gd";
 
-pub const GDX_GITIGNORE_ENTRIES: &[&str] = &[".godot/", ".gdx/runs/", ".gdx/daemon/", "export/"];
+pub const GDX_GITIGNORE_ENTRIES: &[&str] = &[".godot/"];

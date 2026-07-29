@@ -17,11 +17,10 @@ pub struct VerifyArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RuntimeSpec {
     #[serde(default)]
     checks: ChecksSpec,
-    #[serde(default)]
-    script_check: Option<ScriptCheckSpec>,
     #[serde(default)]
     tests: Vec<TestSpec>,
     #[serde(default)]
@@ -31,12 +30,14 @@ struct RuntimeSpec {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ChecksSpec {
     #[serde(default)]
     script: Option<ScriptCheckSpec>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ScriptCheckSpec {
     #[serde(default = "default_root")]
     root: String,
@@ -45,6 +46,7 @@ struct ScriptCheckSpec {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TestSpec {
     path: String,
     #[serde(default = "default_test_method")]
@@ -52,6 +54,7 @@ struct TestSpec {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DaemonSpec {
     scene: Option<String>,
     port: Option<u16>,
@@ -66,6 +69,7 @@ struct DaemonSpec {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StepSpec {
     #[serde(default)]
     call: Option<CallStep>,
@@ -82,14 +86,13 @@ struct StepSpec {
     #[serde(default)]
     input_drag: Option<DragStep>,
     #[serde(default)]
-    input_swipe: Option<DragStep>,
-    #[serde(default)]
     input_pinch: Option<PinchStep>,
     #[serde(default)]
     input_touch_sequence: Option<TouchSequenceStep>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CallStep {
     target: String,
     method: String,
@@ -98,6 +101,7 @@ struct CallStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StateStep {
     target: String,
     method: Option<String>,
@@ -105,6 +109,7 @@ struct StateStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CaptureStep {
     out: PathBuf,
     #[serde(default = "default_capture_frames")]
@@ -112,6 +117,7 @@ struct CaptureStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ClickNodeStep {
     target: String,
     #[serde(default = "default_button")]
@@ -121,11 +127,13 @@ struct ClickNodeStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ActivateStep {
     target: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TapStep {
     position: Vec<f64>,
     #[serde(default)]
@@ -135,6 +143,7 @@ struct TapStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DragStep {
     from: Vec<f64>,
     to: Vec<f64>,
@@ -147,6 +156,7 @@ struct DragStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PinchStep {
     center: Vec<f64>,
     start_distance: f64,
@@ -160,6 +170,7 @@ struct PinchStep {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TouchSequenceStep {
     events: Vec<session::TouchEvent>,
 }
@@ -180,7 +191,7 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
     let mut daemon_stop = false;
 
     let execution = (|| -> GdxResult<()> {
-        if let Some(script) = spec.script_check.or(spec.checks.script) {
+        if let Some(script) = spec.checks.script {
             let value = if script.strict {
                 code::run_check_all(
                     ctx,
@@ -195,7 +206,15 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
             } else {
                 code::run_load_check(ctx, &code::LoadCheckArgs { root: script.root })?
             };
-            results.push(json!({ "kind": "script_check", "result": value }));
+            let mut summary = json!({
+                "kind": "script_check",
+                "check": value.get("check"),
+                "counts": value.get("counts"),
+            });
+            if let Some(result) = value.get("result") {
+                summary["result"] = result.clone();
+            }
+            results.push(summary);
         }
 
         for (index, test) in spec.tests.iter().enumerate() {
@@ -207,7 +226,13 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
                 },
             )
             .map_err(|err| step_error("test", index, err))?;
-            results.push(json!({ "kind": "test", "index": index, "result": value }));
+            results.push(json!({
+                "kind": "test",
+                "index": index,
+                "path": test.path,
+                "method": test.method,
+                "result": value.get("result")
+            }));
         }
 
         if let Some(daemon_spec) = &spec.daemon {
@@ -229,7 +254,12 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
                 .map(|already| !already)
                 .unwrap_or(false);
             daemon_stop = daemon_spec.stop;
-            results.push(json!({ "kind": "daemon_start", "result": value }));
+            results.push(json!({
+                "kind": "daemon_start",
+                "already_running": value.get("already_running"),
+                "runtime": value.get("runtime"),
+                "health": value.get("health")
+            }));
         }
 
         for (index, step) in spec.steps.iter().enumerate() {
@@ -243,7 +273,11 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
 
     if daemon_started_by_verify && daemon_stop {
         match session::run_stop(ctx, &session::StopArgs { force: true }) {
-            Ok(value) => results.push(json!({ "kind": "daemon_stop", "result": value })),
+            Ok(value) => results.push(json!({
+                "kind": "daemon_stop",
+                "killed": value.get("killed"),
+                "reason": value.get("reason")
+            })),
             Err(err) if execution.is_ok() => return Err(err),
             Err(_) => {}
         }
@@ -251,12 +285,14 @@ pub fn run(ctx: &AppContext, args: &VerifyArgs) -> GdxResult<Value> {
 
     execution?;
 
+    let step_count = results.len();
     Ok(json!({
         "ok": true,
         "command": "verify",
         "project": godot_path_string(&project.root),
         "spec": godot_path_string(&spec_path),
-        "results": results
+        "step_count": step_count,
+        "steps": results
     }))
 }
 
@@ -274,7 +310,6 @@ fn run_step(
         step.input_activate.is_some(),
         step.input_tap.is_some(),
         step.input_drag.is_some(),
-        step.input_swipe.is_some(),
         step.input_pinch.is_some(),
         step.input_touch_sequence.is_some(),
     ]
@@ -316,7 +351,7 @@ fn run_step(
     if let Some(capture) = &step.capture {
         let out = ctx.abs_path(&capture.out);
         ensure_parent_dir(&out)?;
-        let result = daemon::rpc(
+        daemon::rpc(
             project_root,
             "capture",
             json!({
@@ -328,13 +363,12 @@ fn run_step(
         return Ok(json!({
             "kind": "capture",
             "index": index,
-            "capture": godot_path_string(&out),
-            "result": result
+            "capture": godot_path_string(&out)
         }));
     }
     if let Some(click) = &step.input_click_node {
         validate_non_empty("target", &click.target)?;
-        let result = daemon::rpc(
+        daemon::rpc(
             project_root,
             "click_node",
             json!({
@@ -344,11 +378,11 @@ fn run_step(
             }),
             10 + u64::from(click.frames),
         )?;
-        return Ok(json!({ "kind": "input_click_node", "index": index, "result": result }));
+        return Ok(json!({ "kind": "input_click_node", "index": index }));
     }
     if let Some(activate) = &step.input_activate {
         validate_non_empty("target", &activate.target)?;
-        let result = daemon::rpc(
+        daemon::rpc(
             project_root,
             "activate_node",
             json!({
@@ -356,12 +390,12 @@ fn run_step(
             }),
             10,
         )?;
-        return Ok(json!({ "kind": "input_activate", "index": index, "result": result }));
+        return Ok(json!({ "kind": "input_activate", "index": index }));
     }
     if let Some(tap) = &step.input_tap {
         let events = session::tap_events(tap.position.clone(), tap.index, tap.frames)?;
-        let result = session::run_touch_sequence_rpc(project_root, events)?;
-        return Ok(json!({ "kind": "input_tap", "index": index, "result": result }));
+        session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_tap", "index": index }));
     }
     if let Some(drag) = &step.input_drag {
         let events = session::drag_events(
@@ -371,19 +405,8 @@ fn run_step(
             drag.steps,
             drag.frames,
         )?;
-        let result = session::run_touch_sequence_rpc(project_root, events)?;
-        return Ok(json!({ "kind": "input_drag", "index": index, "result": result }));
-    }
-    if let Some(swipe) = &step.input_swipe {
-        let events = session::drag_events(
-            swipe.from.clone(),
-            swipe.to.clone(),
-            swipe.index,
-            swipe.steps,
-            swipe.frames,
-        )?;
-        let result = session::run_touch_sequence_rpc(project_root, events)?;
-        return Ok(json!({ "kind": "input_swipe", "index": index, "result": result }));
+        session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_drag", "index": index }));
     }
     if let Some(pinch) = &step.input_pinch {
         let events = session::pinch_events(
@@ -394,13 +417,13 @@ fn run_step(
             pinch.steps,
             pinch.frames,
         )?;
-        let result = session::run_touch_sequence_rpc(project_root, events)?;
-        return Ok(json!({ "kind": "input_pinch", "index": index, "result": result }));
+        session::run_touch_sequence_rpc(project_root, events)?;
+        return Ok(json!({ "kind": "input_pinch", "index": index }));
     }
     if let Some(sequence) = &step.input_touch_sequence {
         session::validate_touch_events(&sequence.events)?;
-        let result = session::run_touch_sequence_rpc(project_root, sequence.events.clone())?;
-        return Ok(json!({ "kind": "input_touch_sequence", "index": index, "result": result }));
+        session::run_touch_sequence_rpc(project_root, sequence.events.clone())?;
+        return Ok(json!({ "kind": "input_touch_sequence", "index": index }));
     }
 
     unreachable!("verify step variant count was checked")
@@ -468,4 +491,29 @@ fn default_touch_frames() -> u32 {
 
 fn default_pinch_steps() -> u32 {
     10
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_removed_legacy_verify_fields() {
+        let legacy_check = serde_json::from_value::<RuntimeSpec>(json!({
+            "script_check": { "root": "res://" }
+        }))
+        .unwrap_err();
+        assert!(legacy_check.to_string().contains("script_check"));
+
+        let legacy_swipe = serde_json::from_value::<RuntimeSpec>(json!({
+            "steps": [{
+                "input_swipe": {
+                    "from": [0, 0],
+                    "to": [1, 1]
+                }
+            }]
+        }))
+        .unwrap_err();
+        assert!(legacy_swipe.to_string().contains("input_swipe"));
+    }
 }

@@ -31,16 +31,33 @@ pub struct DaemonSession {
     pub started_at: u64,
 }
 
+pub fn runtime_dir(project: &Path) -> PathBuf {
+    let canonical = fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
+    let mut identity = godot_path_string(&canonical);
+    if cfg!(windows) {
+        identity.make_ascii_lowercase();
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in identity.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    std::env::temp_dir()
+        .join("gdx")
+        .join("runtime")
+        .join(format!("{hash:016x}"))
+}
+
 pub fn session_path(project: &Path) -> PathBuf {
-    project.join(".gdx").join("daemon").join("session.json")
+    runtime_dir(project).join("session.json")
 }
 
 pub fn read_session(project: &Path) -> GdxResult<DaemonSession> {
     let path = session_path(project);
-    let text = fs::read_to_string(&path).map_err(|err| {
+    let text = fs::read_to_string(&path).map_err(|_| {
         GdxError::not_found(
             "daemon_not_running",
-            format!("Cannot read daemon session {}: {err}", path.display()),
+            "No active daemon session for this project",
         )
     })?;
     serde_json::from_str(text.trim_start_matches('\u{feff}'))
@@ -52,7 +69,7 @@ pub fn write_session(project: &Path, session: &DaemonSession) -> GdxResult<()> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
     }
-    let text = serde_json::to_string_pretty(session)
+    let text = serde_json::to_string(session)
         .map_err(|err| GdxError::tool("json_failed", format!("Cannot serialize session: {err}")))?;
     fs::write(&path, text).map_err(|err| {
         GdxError::tool(
@@ -63,7 +80,7 @@ pub fn write_session(project: &Path, session: &DaemonSession) -> GdxResult<()> {
 }
 
 pub fn remove_session(project: &Path) {
-    let _ = fs::remove_file(session_path(project));
+    let _ = fs::remove_dir_all(runtime_dir(project));
 }
 
 pub fn rpc(project: &Path, method: &str, params: Value, timeout_secs: u64) -> GdxResult<Value> {
@@ -204,7 +221,7 @@ pub struct SpawnDaemon {
 }
 
 pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
-    let daemon_dir = args.project.join(".gdx").join("daemon");
+    let daemon_dir = runtime_dir(&args.project);
     ensure_dir(&daemon_dir)?;
     let stdout_log = daemon_dir.join("godot.daemon.stdout.log");
     let stderr_log = daemon_dir.join("godot.daemon.stderr.log");
@@ -268,10 +285,10 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
             let error = GdxError::cancelled("Daemon startup was cancelled")
                 .with_stage("daemon_start")
                 .with_child_pid(session.pid)
-                .with_elapsed_ms(started.elapsed().as_millis())
-                .with_artifact("stdout_log", session.stdout_log.clone())
-                .with_artifact("stderr_log", session.stderr_log.clone());
-            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+                .with_elapsed_ms(started.elapsed().as_millis());
+            let error = attach_log_diagnostics(error, &stdout_log, &stderr_log);
+            remove_session(&args.project);
+            return Err(error);
         }
         if let Some(status) = child.try_wait().map_err(|err| {
             GdxError::tool("wait_failed", format!("Cannot check daemon status: {err}"))
@@ -279,10 +296,10 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
             let error = GdxError::tool(
                 "daemon_exited",
                 format!("Godot daemon exited early with status {status}"),
-            )
-            .with_artifact("stdout_log", session.stdout_log.clone())
-            .with_artifact("stderr_log", session.stderr_log.clone());
-            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+            );
+            let error = attach_log_diagnostics(error, &stdout_log, &stderr_log);
+            remove_session(&args.project);
+            return Err(error);
         }
         if ping_session(&session) {
             return Ok(session);
@@ -292,10 +309,13 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
 
     let _ = kill_process(child.id(), true);
     let _ = child.wait();
-    let error = GdxError::timeout("Timed out waiting for daemon to start")
-        .with_artifact("stdout_log", session.stdout_log)
-        .with_artifact("stderr_log", session.stderr_log);
-    Err(attach_log_diagnostics(error, &stdout_log, &stderr_log))
+    let error = attach_log_diagnostics(
+        GdxError::timeout("Timed out waiting for daemon to start"),
+        &stdout_log,
+        &stderr_log,
+    );
+    remove_session(&args.project);
+    Err(error)
 }
 
 #[cfg(not(windows))]
@@ -429,6 +449,7 @@ mod tests {
             uuid::Uuid::new_v4().simple()
         ));
         let path = session_path(&project);
+        assert!(!path.starts_with(&project));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
             &path,
@@ -439,6 +460,6 @@ mod tests {
         let session = read_session(&project).unwrap();
 
         assert_eq!(session.port, 2);
-        let _ = fs::remove_dir_all(project);
+        remove_session(&project);
     }
 }

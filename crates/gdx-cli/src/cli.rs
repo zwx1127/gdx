@@ -3,9 +3,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::commands::{
-    asset, code, export, init, play, project_cmd, resource, runs, scene, session, test_cmd,
+    asset, code, export, init, play, project_cmd, resource, scene, session, test_cmd,
 };
-use crate::diagnostics::WarningMode;
 use crate::progress::ProgressMode;
 
 #[derive(Debug, Parser)]
@@ -26,9 +25,6 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = ProgressMode::Auto)]
     pub progress: ProgressMode,
 
-    #[arg(long, global = true, value_enum, default_value_t = WarningMode::Summary)]
-    pub warnings: WarningMode,
-
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -36,7 +32,6 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Doctor,
-    Runs(RunsCommand),
     Project(ProjectCommand),
     Setting(SettingCommand),
     Autoload(AutoloadCommand),
@@ -61,15 +56,30 @@ impl Cli {
     pub fn command_name(&self) -> &'static str {
         match &self.command {
             Commands::Doctor => "doctor",
-            Commands::Runs(command) => match command.command {
-                RunsSubcommand::List(_) => "runs.list",
-                RunsSubcommand::Prune(_) => "runs.prune",
+            Commands::Project(command) => match command.command {
+                ProjectSubcommand::Create(_) => "project.create",
+                ProjectSubcommand::Inspect(_) => "project.inspect",
+                ProjectSubcommand::Update(_) => "project.update",
             },
-            Commands::Project(_) => "project",
-            Commands::Setting(_) => "setting",
-            Commands::Autoload(_) => "autoload",
-            Commands::InputMap(_) => "input-map",
-            Commands::Asset(_) => "asset",
+            Commands::Setting(command) => match command.command {
+                SettingSubcommand::Get(_) => "setting.get",
+                SettingSubcommand::Set(_) => "setting.set",
+                SettingSubcommand::List(_) => "setting.list",
+            },
+            Commands::Autoload(command) => match command.command {
+                AutoloadSubcommand::Add(_) => "autoload.add",
+                AutoloadSubcommand::Remove(_) => "autoload.remove",
+                AutoloadSubcommand::List(_) => "autoload.list",
+            },
+            Commands::InputMap(command) => match command.command {
+                InputMapSubcommand::Add(_) => "input-map.add",
+                InputMapSubcommand::Remove(_) => "input-map.remove",
+                InputMapSubcommand::List(_) => "input-map.list",
+            },
+            Commands::Asset(command) => match command.command {
+                AssetSubcommand::Import(_) => "asset.import",
+                AssetSubcommand::Inspect(_) => "asset.inspect",
+            },
             Commands::Script(command) => match command.command {
                 ScriptSubcommand::Create(_) => "script.create",
                 ScriptSubcommand::Attach(_) => "script.attach",
@@ -77,35 +87,48 @@ impl Cli {
                 ScriptSubcommand::CheckAll(_) => "script.check-all",
                 ScriptSubcommand::LoadCheck(_) => "script.load-check",
             },
-            Commands::Scene(_) => "scene",
-            Commands::Node(_) => "node",
+            Commands::Scene(command) => match command.command {
+                SceneSubcommand::Create(_) => "scene.create",
+                SceneSubcommand::Build(_) => "scene.build",
+                SceneSubcommand::Tree(_) => "scene.tree",
+                SceneSubcommand::Save(_) => "scene.save",
+            },
+            Commands::Node(command) => match command.command {
+                NodeSubcommand::Create(_) => "node.create",
+                NodeSubcommand::Set(_) => "node.set",
+            },
             Commands::Daemon(command) => match command.command {
                 DaemonSubcommand::Start(_) => "daemon.start",
                 DaemonSubcommand::Status(_) => "daemon.status",
                 DaemonSubcommand::Stop(_) => "daemon.stop",
             },
-            Commands::Input(_) => "input",
+            Commands::Input(command) => match command.command {
+                InputSubcommand::Send(_) => "input.send",
+                InputSubcommand::Click(_) => "input.click",
+                InputSubcommand::ClickNode(_) => "input.click-node",
+                InputSubcommand::Touch(_) => "input.touch",
+                InputSubcommand::Tap(_) => "input.tap",
+                InputSubcommand::Drag(_) => "input.drag",
+                InputSubcommand::Pinch(_) => "input.pinch",
+                InputSubcommand::Sequence(_) => "input.sequence",
+                InputSubcommand::Activate(_) => "input.activate",
+            },
             Commands::Call(_) => "call.invoke",
             Commands::State(_) => "state.get",
-            Commands::Capture(_) => "capture",
-            Commands::Resource(_) => "resource",
+            Commands::Capture(command) => match command.command {
+                CaptureSubcommand::Run(_) => "capture.run",
+                CaptureSubcommand::Daemon(_) => "capture.daemon",
+                CaptureSubcommand::Record(_) => "capture.record",
+            },
+            Commands::Resource(command) => match command.command {
+                ResourceSubcommand::Create(_) => "resource.create",
+                ResourceSubcommand::Inspect(_) => "resource.inspect",
+            },
             Commands::Test(_) => "test.run",
             Commands::Export(_) => "export.build",
             Commands::Verify(_) => "verify",
         }
     }
-}
-
-#[derive(Debug, Args)]
-pub struct RunsCommand {
-    #[command(subcommand)]
-    pub command: RunsSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum RunsSubcommand {
-    List(runs::ListArgs),
-    Prune(runs::PruneArgs),
 }
 
 #[derive(Debug, Args)]
@@ -117,7 +140,6 @@ pub struct ProjectCommand {
 #[derive(Debug, Subcommand)]
 pub enum ProjectSubcommand {
     Create(init::CreateArgs),
-    Install(project_cmd::InstallArgs),
     Inspect(project_cmd::InspectArgs),
     Update(project_cmd::UpdateArgs),
 }
@@ -169,7 +191,6 @@ pub struct AssetCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AssetSubcommand {
-    Copy(asset::CopyArgs),
     Import(asset::ImportArgs),
     Inspect(asset::InspectArgs),
 }
@@ -242,7 +263,6 @@ pub enum InputSubcommand {
     Touch(session::TouchArgs),
     Tap(session::TapArgs),
     Drag(session::DragArgs),
-    Swipe(session::DragArgs),
     Pinch(session::PinchArgs),
     Sequence(session::SequenceArgs),
     Activate(session::ActivateArgs),

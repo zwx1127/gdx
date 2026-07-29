@@ -12,6 +12,8 @@ The agent owns:
 - Asset placement.
 - Test methods and runtime state methods.
 - Failure interpretation and repair.
+- Visual baselines, image thresholds, masks, and product acceptance rules.
+- Deciding when changed project assets require an explicit import.
 
 `gdx` owns:
 
@@ -22,21 +24,23 @@ The agent owns:
 - Scene/resource creation.
 - Daemon input, calls, state reads, captures, and one-shot scene recordings.
 - Godot script checks, tests, verification, and exports.
+- Compact structured progress and bounded failure diagnostics.
 
 ## Command contract
 
-All success output is JSON on stdout. All failures are JSON on stderr.
+All success output is one compact JSON line on stdout. Progress and failures use stderr. `doctor` reports the actual gdx executable, version, and build commit.
 
 On failure:
 
 1. Parse stderr JSON.
-2. Read `error.code`, `message`, and `suggestion`.
+2. Read `error`, `message`, and `suggestion`.
 3. Inspect `details.diagnostics.primary_error` when present.
-4. Open `artifacts.stdout_log` or `artifacts.stderr_log` only when the JSON summary is not enough.
-5. Fix the project file, spec, asset, or command argument.
-6. Re-run the narrowest failing command.
+4. Fix the project file, spec, asset, or command argument.
+5. Re-run the narrowest failing command.
 
 Do not infer success from free-form Godot output. Use the JSON `ok` field and expected artifacts such as created scenes or non-empty screenshots.
+
+When output must be retained, use ordinary shell redirection: `gdx ... 1>result.json 2>progress.ndjson`. gdx does not create project-local run history.
 
 ## Standard workflow
 
@@ -51,7 +55,7 @@ gdx --project .\demo scene create --out res://scenes/main.tscn --root-type Node2
 Existing project:
 
 ```powershell
-gdx --project C:\Path\To\Game project install
+gdx --project C:\Path\To\Game project update
 gdx --project C:\Path\To\Game project inspect
 gdx --project C:\Path\To\Game project update --check
 ```
@@ -62,8 +66,10 @@ Build and verify:
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
 gdx --project .\demo test run --path res://tests/smoke_test.gd --method run_tests
-gdx --project .\demo verify --spec .\demo\.gdx\verify.json
+gdx --project .\demo verify --spec .\demo\verify.json
 ```
+
+Run `asset import` because the project workflow knows assets changed; daemon startup intentionally does not scan for or infer pending business assets.
 
 ## Remote workflow with agent-relay
 
@@ -100,9 +106,11 @@ gdx --project .\demo state get --target / --method gdx_state
 
 `state get --target /` defaults to `gdx_state()` when no method or property is supplied, and its result says whether the value came from a method or property.
 
-For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input swipe`, `input pinch`, or `input sequence` instead of mouse clicks. Touch commands require the daemon runtime to advertise `touch_sequence`; if they report `daemon_runtime_outdated`, run `project update --check`, update the managed runtime, and restart the daemon.
+For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input pinch`, or `input sequence` instead of mouse clicks. Touch commands require `touch_sequence`; if they report `daemon_runtime_outdated`, run `project update --check`, update the managed runtime, and restart the daemon.
 
-For animation review, use `capture record --out .gdx/recording.avi --duration 3 --fps 60` after selecting the scene state you want to launch. Add `--input-sequence <json>` to replay touch events during recording. This uses Godot Movie Writer and records a freshly started scene, not the current daemon session.
+For animation review, use `capture record --out artifacts/recording.avi --duration 3 --fps 60` after selecting the scene state you want to launch. Add `--input-sequence <json>` to replay touch events during recording. This uses Godot Movie Writer and records a freshly started scene, not the current daemon session.
+
+Captures are evidence, not a gdx-owned product assertion. Keep visual comparison code and thresholds in the game repository and let project tests or validation methods decide whether the result is acceptable.
 
 ## Verify specs
 
@@ -116,12 +124,12 @@ Use `verify` for multi-step regression checks:
   "steps": [
     { "call": { "target": "/", "method": "gdx_start_run", "args": [] } },
     { "state": { "target": "/", "method": "gdx_state" } },
-    { "capture": { "out": ".gdx/main.png", "frames": 10 } }
+    { "capture": { "out": "artifacts/main.png", "frames": 10 } }
   ]
 }
 ```
 
-Each step must contain exactly one action. Supported step keys are `call`, `state`, `capture`, `input_click_node`, `input_activate`, `input_tap`, `input_drag`, `input_swipe`, `input_pinch`, and `input_touch_sequence`.
+Each step must contain exactly one action. Supported step keys are `call`, `state`, `capture`, `input_click_node`, `input_activate`, `input_tap`, `input_drag`, `input_pinch`, and `input_touch_sequence`. The result returns compact `steps`; product assertions remain in project tests or methods.
 
 ## GDScript caution
 

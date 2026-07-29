@@ -16,13 +16,19 @@ If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`. 
 
 ## A long command appears stuck
 
-Use `--progress ndjson` and parse stderr one line at a time. A command emits `command_started` immediately and a `heartbeat` at least every five seconds. Godot child events include the PID, subject, timeout, and log paths. On timeout or Ctrl+C, gdx keeps those logs and terminates the one-shot process tree; cancellation exits with code 130.
+Use `--progress ndjson` and parse stderr one line at a time. A command emits `command_started` immediately and a heartbeat at least every five seconds. Godot child events include PID, subject, and timeout. Redirect stderr with the shell when progress must be retained:
+
+```powershell
+gdx --project .\demo --progress ndjson script check-all 1>result.json 2>progress.ndjson
+```
+
+Do not treat non-empty stderr as failure; use the process exit code. On timeout or Ctrl+C, gdx terminates the one-shot process tree and deletes its temporary logs after extracting bounded diagnostics. Cancellation exits with code 130.
 
 For `script check-all`, reduce concurrency with `--jobs 1` or `--jobs 2`, narrow the tree with repeated `--exclude res://...`, and adjust `--script-timeout-secs` separately from the global `--timeout-secs`.
 
 ## Godot crashes in native code
 
-If stderr JSON reports `error: "godot_native_crash"` or diagnostics `primary_error: "godot_native_crash"`, Godot exited before gdx received runtime JSON. Check the included Godot stdout/stderr logs and the local Godot/runtime environment. gdx reports this distinctly from GDScript parse errors, but it does not switch Godot binaries automatically.
+If stderr JSON reports `error: "godot_native_crash"` or diagnostics `primary_error: "godot_native_crash"`, Godot exited before gdx received runtime JSON. Check the structured stdout/stderr tails and the local Godot/runtime environment. gdx reports this distinctly from GDScript parse errors, but it does not switch Godot binaries automatically.
 
 ## Main scene is missing
 
@@ -40,11 +46,10 @@ gdx --project .\demo daemon start --scene res://scenes/main.tscn
 
 Read stderr JSON first:
 
-- `error.code`
+- `error`
 - `message`
 - `suggestion`
 - `details.diagnostics.primary_error`
-- `artifacts.stderr_log`
 
 Fix the first parser or load error, then re-run:
 
@@ -70,21 +75,13 @@ gdx --project .\demo daemon start --restart
 gdx --project .\demo daemon stop --force
 ```
 
-Daemon session data lives under `.gdx/daemon/session.json`. Prefer command cleanup over deleting files manually.
+Daemon session data and current logs live under the current user's OS temporary directory, keyed by canonical project path. `daemon stop` and stale-session detection clean them automatically. Existing legacy `.gdx/daemon` directories are not daemon state for current gdx releases.
 
 If `daemon start` reports `project_unhealthy`, inspect `health.first_error` and the attached daemon logs. Parsing, resource, and scene-load errors block startup and the newly started daemon is stopped automatically. Missing .NET SDK messages from a GDScript-only project are treated as environment warnings. Use `--no-health-check` only for deliberate diagnostics; it returns `project_healthy: null`.
 
-## Run history consumes disk space
+## A legacy `.gdx/runs` directory consumes disk space
 
-Preview before deleting:
-
-```powershell
-gdx --project .\demo runs list
-gdx --project .\demo runs prune
-gdx --project .\demo runs prune --apply
-```
-
-The first applied prune enrolls legacy `.gdx/runs` directories into automatic retention. Running records and daemon state are protected. Use the returned `candidate_count`, `candidate_bytes`, `deleted`, and `freed_bytes` fields instead of deleting run directories manually.
+Current gdx releases do not create or manage run history. An existing `.gdx/runs` directory came from an older version and is left untouched to avoid deleting user data. Review and remove or archive it with normal filesystem tools.
 
 ## Daemon runtime is older than the CLI
 
@@ -96,7 +93,7 @@ gdx --project .\demo project update
 gdx --project .\demo daemon start --restart
 ```
 
-`daemon status` promotes `runtime_status`, `runtime_version`, `protocol_version`, `methods`, and `warnings` at the top level. `runtime_status: "unknown"` means the project runtime predates the capabilities RPC; `runtime_status: "outdated"` means the runtime is known but missing a capability such as `touch_sequence`.
+`daemon start` checks managed runtime hashes and protocol compatibility before spawning Godot. `daemon status` reports a concise nested `runtime` object with `status`, `version`, and `protocol_version`. Stable status values are `current`, `outdated`, `unknown`, and `not_running`.
 
 Touch commands and verify touch steps do not downgrade to mouse events. If the project runtime lacks `touch_sequence`, update the managed runtime files and restart the daemon.
 
@@ -111,13 +108,15 @@ Check:
 - Assets were imported before capture.
 - Capture resolution is high enough for the target view.
 
-For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`. For mobile gameplay that handles `InputEventScreenTouch` or `InputEventScreenDrag`, use touch commands such as `input tap`, `input swipe`, `input pinch`, or `input sequence`. Touch commands require `touch_sequence` support in the daemon runtime and intentionally do not fall back to mouse events.
+For UI regressions, prefer `verify --spec`, project-level methods, `input click-node`, or `input activate`. For mobile gameplay that handles `InputEventScreenTouch` or `InputEventScreenDrag`, use touch commands such as `input tap`, `input drag`, `input pinch`, or `input sequence`. Touch commands require `touch_sequence` support in the daemon runtime and intentionally do not fall back to mouse events.
+
+gdx only captures the artifact. The game project owns visual baselines, pixel/SSIM thresholds, masks, and the decision that a result satisfies product requirements. If assets changed, the project workflow must explicitly run `asset import` before capture or daemon restart; gdx does not infer that business-level change.
 
 ## Recording is missing or empty
 
 `capture record` writes AVI files through Godot Movie Writer and launches a fresh scene. It does not record an already running daemon session.
 
-Use `capture record --input-sequence <json>` to replay touch events in that fresh scene while recording a gesture. Use a `.avi` output path, keep `--duration` and `--fps` small while debugging, and inspect `artifacts.stderr_log` when Godot exits without a recording.
+Use `capture record --input-sequence <json>` to replay touch events in that fresh scene while recording a gesture. Use a `.avi` output path and keep `--duration` and `--fps` small while debugging. On failure, inspect the structured diagnostics in stderr.
 
 ## Scene build fails
 

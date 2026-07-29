@@ -41,7 +41,6 @@ pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Va
     let binary = ctx.locate_godot()?;
     let result = ctx.run_godot(GodotCommand {
         binary,
-        project: project.root.clone(),
         args: vec![
             "--headless".to_string(),
             "--path".to_string(),
@@ -67,10 +66,6 @@ pub fn run_build(ctx: &AppContext, args: &BuildArgs) -> GdxResult<serde_json::Va
         "command": "export.build",
         "project": godot_path_string(&project.root),
         "preset": args.preset,
-        "out": godot_path_string(&out),
-        "artifacts": {
-            "stdout_log": godot_path_string(&result.stdout_log),
-            "stderr_log": godot_path_string(&result.stderr_log)
-        }
+        "out": godot_path_string(&out)
     }))
 }

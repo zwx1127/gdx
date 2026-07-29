@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -27,16 +27,6 @@ pub enum ResolvedProgressMode {
     Off,
 }
 
-impl ResolvedProgressMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Human => "stderr",
-            Self::Ndjson => "ndjson",
-            Self::Off => "off",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ProgressReporter {
     inner: Arc<ProgressInner>,
@@ -53,7 +43,6 @@ struct ProgressInner {
     command: String,
     run_id: String,
     started: Instant,
-    writer: Mutex<()>,
 }
 
 impl ProgressReporter {
@@ -71,7 +60,6 @@ impl ProgressReporter {
                 command: command.into(),
                 run_id: format!("c_{}", Uuid::new_v4().simple()),
                 started: Instant::now(),
-                writer: Mutex::new(()),
             }),
         }
     }
@@ -130,8 +118,6 @@ impl ProgressReporter {
         pid: u32,
         subject: Option<&str>,
         timeout_secs: u64,
-        stdout_log: &str,
-        stderr_log: &str,
     ) {
         self.event(
             "child_started",
@@ -140,10 +126,6 @@ impl ProgressReporter {
                 "child_pid": pid,
                 "subject": subject,
                 "timeout_secs": timeout_secs,
-                "artifacts": {
-                    "stdout_log": stdout_log,
-                    "stderr_log": stderr_log,
-                }
             }),
         );
     }
@@ -183,11 +165,20 @@ impl ProgressReporter {
         if self.inner.mode == ResolvedProgressMode::Off {
             return;
         }
-        let _guard = self
-            .inner
-            .writer
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+        let mut value = json!({
+            "type": "progress",
+            "event": event,
+            "command": self.inner.command,
+            "run_id": self.inner.run_id,
+            "timestamp_ms": unix_time_ms(),
+            "elapsed_ms": self.elapsed().as_millis(),
+        });
+        if let (Some(target), Some(source)) = (value.as_object_mut(), fields.as_object()) {
+            for (key, field) in source {
+                target.insert(key.clone(), field.clone());
+            }
+        }
+
         let mut stderr = io::stderr().lock();
         match self.inner.mode {
             ResolvedProgressMode::Human => {
@@ -214,19 +205,6 @@ impl ProgressReporter {
                 );
             }
             ResolvedProgressMode::Ndjson => {
-                let mut value = json!({
-                    "type": "progress",
-                    "event": event,
-                    "command": self.inner.command,
-                    "run_id": self.inner.run_id,
-                    "timestamp_ms": unix_time_ms(),
-                    "elapsed_ms": self.elapsed().as_millis(),
-                });
-                if let (Some(target), Some(source)) = (value.as_object_mut(), fields.as_object()) {
-                    for (key, field) in source {
-                        target.insert(key.clone(), field.clone());
-                    }
-                }
                 if let Ok(text) = serde_json::to_string(&value) {
                     let _ = writeln!(stderr, "{text}");
                 }
@@ -238,19 +216,6 @@ impl ProgressReporter {
 
     pub fn completed(&self, ok: bool) {
         self.event("completed", json!({ "ok": ok }));
-    }
-
-    pub fn enrich_success(&self, value: &mut Value) {
-        if !value.is_object() {
-            return;
-        }
-        value["run_id"] = json!(self.run_id());
-        value["duration_ms"] = json!(self.elapsed().as_millis());
-        value["progress_mode"] = json!(self.mode().as_str());
-        if !value.get("timing").is_some_and(Value::is_object) {
-            value["timing"] = json!({});
-        }
-        value["timing"]["total_ms"] = json!(self.elapsed().as_millis());
     }
 
     pub fn enrich_error(&self, error: &mut GdxError) {

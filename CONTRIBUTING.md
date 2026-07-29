@@ -25,7 +25,7 @@ target\debug\gdx.exe doctor
 - Update `README.md`, `README.zh-CN.md`, `docs/`, and `skills/gdx-game-dev/` when public CLI behavior changes.
 - Keep command output machine-readable JSON.
 - Prefer narrow error codes, useful `suggestion` text, and attached Godot log artifacts for failures.
-- Do not commit local runtime files such as `.env`, `.agent-relay/`, `.godot/`, `.gdx/runs/`, generated screenshots, exports, or private project assets.
+- Do not commit local runtime files such as `.env`, `.agent-relay/`, `.godot/`, generated screenshots, exports, or private project assets. Old `.gdx/runs/` directories created by earlier `gdx` versions are legacy data and should remain uncommitted.
 
 ## Project structure
 

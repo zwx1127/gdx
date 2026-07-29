@@ -3,25 +3,15 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::GdxError;
-use crate::project::godot_path_string;
 
 const MAX_TAIL_LINES: usize = 40;
+const MAX_DIAGNOSTIC_CHARS: usize = 1_024;
 const MAX_GROUPS: usize = 1_000;
 const SUMMARY_GROUPS: usize = 20;
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum WarningMode {
-    All,
-    #[default]
-    Summary,
-    Error,
-}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct LogRecord {
@@ -30,6 +20,10 @@ pub struct LogRecord {
     pub message: String,
     pub location: Option<String>,
     pub count: u64,
+    #[serde(default = "default_diagnostic_source")]
+    pub source: String,
+    #[serde(default = "default_blocking")]
+    pub blocking: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -38,6 +32,10 @@ pub struct LogSummary {
     pub warnings: u64,
     pub unique_errors: usize,
     pub unique_warnings: usize,
+    #[serde(default)]
+    pub blocking_errors: u64,
+    #[serde(default)]
+    pub non_blocking_diagnostics: u64,
     pub first_error: Option<LogRecord>,
     pub first_warning: Option<LogRecord>,
     pub groups: Vec<LogRecord>,
@@ -73,25 +71,31 @@ impl LogSummary {
         self.recount_unique();
     }
 
-    pub fn filtered(&self, mode: WarningMode) -> Self {
+    pub fn apply_project_context(&mut self, csharp_project: bool) {
+        for record in &mut self.groups {
+            classify_record_context(record, csharp_project);
+        }
+        if let Some(record) = &mut self.first_error {
+            classify_record_context(record, csharp_project);
+        }
+        if let Some(record) = &mut self.first_warning {
+            classify_record_context(record, csharp_project);
+        }
+        self.recount_unique();
+    }
+
+    pub fn bounded(&self) -> Self {
         let mut value = self.clone();
-        value.groups = match mode {
-            WarningMode::All => value.groups,
-            WarningMode::Summary => value.groups.into_iter().take(SUMMARY_GROUPS).collect(),
-            WarningMode::Error => value
-                .groups
-                .into_iter()
-                .filter(|record| record.severity == "error")
-                .take(SUMMARY_GROUPS)
-                .collect(),
-        };
+        value.groups = value.groups.into_iter().take(SUMMARY_GROUPS).collect();
         value.groups_truncated |= value.groups.len() < self.groups.len();
         value
     }
 
     pub fn first_hard_error(&self, csharp_project: bool) -> Option<&LogRecord> {
         self.groups.iter().find(|record| {
-            record.severity == "error" && (csharp_project || record.code != "dotnet_sdk_missing")
+            record.severity == "error"
+                && record.blocking
+                && (csharp_project || record.code != "dotnet_sdk_missing")
         })
     }
 
@@ -106,7 +110,40 @@ impl LogSummary {
             .iter()
             .filter(|record| record.severity == "warning")
             .count();
+        self.blocking_errors = self
+            .groups
+            .iter()
+            .filter(|record| record.severity == "error" && record.blocking)
+            .map(|record| record.count)
+            .sum();
+        self.non_blocking_diagnostics = self
+            .groups
+            .iter()
+            .filter(|record| !record.blocking)
+            .map(|record| record.count)
+            .sum();
     }
+}
+
+fn default_diagnostic_source() -> String {
+    "godot".to_string()
+}
+
+fn default_blocking() -> bool {
+    true
+}
+
+fn classify_record_context(record: &mut LogRecord, csharp_project: bool) {
+    record.source = match record.code.as_str() {
+        "dotnet_sdk_missing" | "filesystem_unavailable" => "environment",
+        "gdscript_warning_as_error"
+        | "gdscript_parse_error"
+        | "scene_load_failed"
+        | "script_load_failed" => "project",
+        _ => "godot",
+    }
+    .to_string();
+    record.blocking = record.code != "dotnet_sdk_missing" || csharp_project;
 }
 
 pub fn attach_log_diagnostics(
@@ -139,11 +176,9 @@ pub fn diagnose_logs(stdout_log: &Path, stderr_log: &Path) -> Value {
         .unwrap_or("unknown_godot_failure");
     json!({
         "primary_error": primary,
-        "stdout_log": godot_path_string(stdout_log),
-        "stderr_log": godot_path_string(stderr_log),
         "stdout_tail": stdout_tail,
         "stderr_tail": stderr_tail,
-        "log_summary": summary.filtered(WarningMode::Summary),
+        "log_summary": summary.bounded(),
     })
 }
 
@@ -170,7 +205,7 @@ pub fn read_tail(path: &Path) -> String {
         if lines.len() == MAX_TAIL_LINES {
             lines.pop_front();
         }
-        lines.push_back(line);
+        lines.push_back(truncate_text(line.trim_end(), MAX_DIAGNOSTIC_CHARS));
     }
     lines.into_iter().collect::<Vec<_>>().join("\n")
 }
@@ -234,14 +269,19 @@ fn summarize_file(path: &Path) -> LogSummary {
                 &mut errors,
                 &mut warnings,
             );
+            let message = truncate_text(message.trim(), MAX_DIAGNOSTIC_CHARS);
             current = Some(LogRecord {
                 severity: severity.to_string(),
-                code: classify_message(message).to_string(),
-                message: message.trim().to_string(),
+                code: classify_message(&message).to_string(),
+                message,
                 location: None,
                 count: 1,
+                source: "godot".to_string(),
+                blocking: true,
             });
-        } else if classify_message(&line) == "godot_native_crash" {
+        } else if classify_message(&truncate_text(&line, MAX_DIAGNOSTIC_CHARS))
+            == "godot_native_crash"
+        {
             flush(
                 &mut current,
                 &mut records,
@@ -255,14 +295,16 @@ fn summarize_file(path: &Path) -> LogSummary {
             current = Some(LogRecord {
                 severity: "error".to_string(),
                 code: "godot_native_crash".to_string(),
-                message: line.trim().to_string(),
+                message: truncate_text(line.trim(), MAX_DIAGNOSTIC_CHARS),
                 location: None,
                 count: 1,
+                source: "godot".to_string(),
+                blocking: true,
             });
         } else if let Some(record) = current.as_mut() {
             let trimmed = line.trim();
             if record.location.is_none() && trimmed.starts_with("at:") {
-                record.location = Some(trimmed.to_string());
+                record.location = Some(truncate_text(trimmed, MAX_DIAGNOSTIC_CHARS));
             }
         }
     }
@@ -282,6 +324,8 @@ fn summarize_file(path: &Path) -> LogSummary {
         warnings,
         unique_errors: 0,
         unique_warnings: 0,
+        blocking_errors: 0,
+        non_blocking_diagnostics: 0,
         first_error,
         first_warning,
         groups: records,
@@ -300,6 +344,15 @@ fn record_header(line: &str) -> Option<(&'static str, &str)> {
         line.strip_prefix("ERROR:")
             .map(|message| ("error", message))
     }
+}
+
+fn truncate_text(text: &str, max_chars: usize) -> String {
+    let Some((end, _)) = text.char_indices().nth(max_chars) else {
+        return text.to_string();
+    };
+    let mut value = text[..end].to_string();
+    value.push('…');
+    value
 }
 
 fn record_key(record: &LogRecord) -> String {
@@ -391,7 +444,7 @@ mod tests {
 
     #[test]
     fn dotnet_error_is_nonfatal_for_gdscript_projects() {
-        let summary = LogSummary {
+        let mut summary = LogSummary {
             errors: 1,
             groups: vec![LogRecord {
                 severity: "error".into(),
@@ -402,8 +455,13 @@ mod tests {
             }],
             ..LogSummary::default()
         };
+        summary.apply_project_context(false);
         assert!(summary.first_hard_error(false).is_none());
+        assert_eq!(summary.blocking_errors, 0);
+        assert_eq!(summary.non_blocking_diagnostics, 1);
+        summary.apply_project_context(true);
         assert!(summary.first_hard_error(true).is_some());
+        assert_eq!(summary.blocking_errors, 1);
     }
 
     #[test]
@@ -418,6 +476,27 @@ mod tests {
         let summary = summarize_file(&path);
 
         assert_eq!(summary.first_error.unwrap().code, "godot_native_crash");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn bounds_diagnostic_messages_and_tail_lines() {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_wide_log_{}_{}.log",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(
+            &path,
+            format!("ERROR: Parse Error: {}\n", "x".repeat(100_000)),
+        )
+        .unwrap();
+
+        let summary = summarize_file(&path);
+        let tail = read_tail(&path);
+
+        assert!(summary.first_error.unwrap().message.chars().count() <= 1_025);
+        assert!(tail.chars().count() <= 1_025);
         let _ = fs::remove_file(path);
     }
 

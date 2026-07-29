@@ -44,11 +44,11 @@ Use Godot class names for `--root-type` and node types, for example `Node2D`, `C
 ## Attach to an existing project
 
 ```powershell
-gdx --project C:\Path\To\Game project install
+gdx --project C:\Path\To\Game project update
 gdx --project C:\Path\To\Game project inspect
 ```
 
-`project install` copies the `addons/gdx_*` runtime files needed by scene automation and daemon workflows. It does not rewrite your game architecture.
+`project update` installs missing `addons/gdx_*` runtime files and updates outdated managed files. It does not rewrite your game architecture or `.gitignore`.
 
 After rebuilding or upgrading `gdx`, refresh an already attached project with:
 
@@ -62,8 +62,8 @@ gdx --project C:\Path\To\Game project update
 ```powershell
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
-gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
-gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\artifacts\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\artifacts\recording.avi --duration 3 --fps 60
 ```
 
 If the project has a configured main scene, `capture run` and `capture record` can omit `--scene`. `capture record` launches the scene through Godot Movie Writer and writes an AVI recording. Add `--input-sequence <json>` to replay touch events in that fresh scene while recording.

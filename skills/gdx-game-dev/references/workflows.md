@@ -15,17 +15,19 @@ Then write scripts/assets/specs and verify:
 ```powershell
 gdx --project .\demo asset import
 gdx --project .\demo script check-all
-gdx --project .\demo verify --spec .\demo\.gdx\verify.json
+gdx --project .\demo verify --spec .\demo\verify.json
 ```
+
+Run `asset import` here because this workflow just created or changed importable assets. It is an explicit project decision, not a daemon-start preflight.
 
 ## Existing Game
 
 ```powershell
-gdx --project C:\Path\To\Game project install
+gdx --project C:\Path\To\Game project update
 gdx --project C:\Path\To\Game project inspect
 ```
 
-Use `project inspect` to find the main scene and existing project files. Avoid replacing project structure unless the user requested a rewrite.
+Use `project inspect` to confirm the main scene, language, and managed addon status. Inspect business files with normal repository tools.
 
 After rebuilding or upgrading `gdx`, refresh an already attached project:
 
@@ -38,7 +40,7 @@ gdx --project C:\Path\To\Game daemon start --restart
 ## Scene Build Loop
 
 1. Write or update scripts.
-2. Copy assets and run `asset import`.
+2. Copy assets and explicitly run `asset import` when those changes require Godot import.
 3. Generate a scene spec JSON with top-level `out` and `root`.
 4. Run `scene build --spec <json>`.
 5. Run `script check-all`.
@@ -47,12 +49,25 @@ gdx --project C:\Path\To\Game daemon start --restart
 ```powershell
 gdx --project .\demo scene build --spec .\main_scene.json
 gdx --project .\demo script check-all
-gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\demo\.gdx\capture.png
-gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\recording.avi --duration 3 --fps 60
-gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\demo\.gdx\gesture.avi --duration 3 --fps 60 --input-sequence .\demo\.gdx\touch-sequence.json
+gdx --project .\demo capture run --scene res://scenes/main.tscn --out .\artifacts\capture.png
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\artifacts\recording.avi --duration 3 --fps 60
+gdx --project .\demo capture record --scene res://scenes/main.tscn --out .\artifacts\gesture.avi --duration 3 --fps 60 --input-sequence .\touch-sequence.json
 ```
 
 `script check-all` is strict and runs Godot's parser over `.gd` files. Use `script load-check` only for the older fast resource-load check.
+
+Keep screenshot baselines, comparison metrics, thresholds, masks, and visual acceptance logic in the game repository. gdx captures evidence and returns paths; it does not decide whether the visuals meet the product goal.
+
+## Long-running automation
+
+Use the shell's native pipelines and redirection:
+
+```powershell
+gdx --project .\demo --progress ndjson verify --spec .\demo\verify.json `
+    1>verify-result.json 2>verify-progress.ndjson
+```
+
+The caller owns retained output, background-process state, retries, and retention. gdx does not create a run database.
 
 ## Daemon Edit Loop
 
@@ -65,7 +80,7 @@ gdx --project .\demo node create --parent / --type Label --name Score
 gdx --project .\demo node set --node /Score --property text --value "Score: 0"
 gdx --project .\demo node set --node /Score --property position --vec2 24 24
 gdx --project .\demo scene save
-gdx --project .\demo capture daemon --out .\demo\.gdx\after-edit.png
+gdx --project .\demo capture daemon --out .\artifacts\after-edit.png
 gdx --project .\demo daemon stop
 ```
 
@@ -88,11 +103,11 @@ gdx --project .\demo state get --target /
 gdx --project .\demo state get --target / --method gdx_state
 gdx --project .\demo input send --keycode 32
 gdx --project .\demo input send --mouse-button 1 --position 320 180
-gdx --project .\demo input send --mouse-button 1 --position 320 180 --release
+gdx --project .\demo input send --mouse-button 1 --position 320 180 --pressed false
 gdx --project .\demo input click-node --target /StartButton
 gdx --project .\demo input activate --target /StartButton
 gdx --project .\demo input tap --position 320 180
-gdx --project .\demo input swipe --from 320 180 --to 320 80
+gdx --project .\demo input drag --from 320 180 --to 320 80
 gdx --project .\demo input pinch --center 320 180 --start-distance 120 --end-distance 40
 gdx --project .\demo call invoke --target / --method start_game --args-json "[]"
 ```
@@ -107,7 +122,7 @@ For multi-step UI/gameplay regression, put the flow in a verify spec:
   "steps": [
     { "call": { "target": "/", "method": "gdx_start_run", "args": [] } },
     { "state": { "target": "/", "method": "gdx_state" } },
-    { "capture": { "out": ".gdx/main.png", "frames": 10 } }
+    { "capture": { "out": "artifacts/main.png", "frames": 10 } }
   ]
 }
 ```
@@ -115,7 +130,7 @@ For multi-step UI/gameplay regression, put the flow in a verify spec:
 Run it with:
 
 ```powershell
-gdx --project .\demo verify --spec .\demo\.gdx\verify.json
+gdx --project .\demo verify --spec .\demo\verify.json
 ```
 
 ## Godot Tests

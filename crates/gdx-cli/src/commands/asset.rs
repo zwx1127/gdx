@@ -1,27 +1,14 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::path::PathBuf;
 
 use clap::Args;
 use serde_json::json;
 
 use crate::context::{validate_res_path, AppContext};
-use crate::error::{GdxError, GdxResult};
+use crate::error::GdxResult;
 use crate::godot::{self, GodotCommand};
-use crate::project::{ensure_parent_dir, godot_path_string, res_to_abs};
-
-#[derive(Debug, Args)]
-pub struct CopyArgs {
-    #[arg(long)]
-    pub from: PathBuf,
-
-    #[arg(long)]
-    pub to: String,
-
-    #[arg(long)]
-    pub force: bool,
-}
+use crate::project::godot_path_string;
 
 #[derive(Debug, Args)]
 pub struct ImportArgs {}
@@ -32,51 +19,11 @@ pub struct InspectArgs {
     pub path: String,
 }
 
-pub fn run_copy(ctx: &AppContext, args: &CopyArgs) -> GdxResult<serde_json::Value> {
-    validate_res_path("--to", &args.to)?;
-    let project = ctx.project()?;
-    let from = ctx.abs_path(&args.from);
-    if !from.is_file() {
-        return Err(GdxError::not_found(
-            "source_not_found",
-            format!("Source file does not exist: {}", from.display()),
-        ));
-    }
-    let to_abs = res_to_abs(&project.root, &args.to)?;
-    if to_abs.exists() && !args.force {
-        return Err(GdxError::user(
-            "asset_exists",
-            format!("Target asset already exists: {}", to_abs.display()),
-        )
-        .with_suggestion("Pass --force to overwrite the target asset."));
-    }
-    ensure_parent_dir(&to_abs)?;
-    fs::copy(&from, &to_abs).map_err(|err| {
-        GdxError::tool(
-            "io_failed",
-            format!(
-                "Cannot copy {} to {}: {err}",
-                from.display(),
-                to_abs.display()
-            ),
-        )
-    })?;
-    Ok(json!({
-        "ok": true,
-        "command": "asset.copy",
-        "project": godot_path_string(&project.root),
-        "from": godot_path_string(&from),
-        "to": args.to,
-        "to_abs": godot_path_string(&to_abs)
-    }))
-}
-
 pub fn run_import(ctx: &AppContext, _args: &ImportArgs) -> GdxResult<serde_json::Value> {
     let project = ctx.project()?;
     let binary = ctx.locate_godot()?;
     let result = ctx.run_godot(GodotCommand {
         binary,
-        project: project.root.clone(),
         args: vec![
             "--headless".to_string(),
             "--path".to_string(),
@@ -100,11 +47,7 @@ pub fn run_import(ctx: &AppContext, _args: &ImportArgs) -> GdxResult<serde_json:
                 "imported": false,
                 "skipped": true,
                 "reason": "mono_dotnet_unavailable",
-                "warning": "Godot mono crashed during editor import because .NET/hostfxr is unavailable. The project has no C# files, so MVP-0 continues without editor import.",
-                "artifacts": {
-                    "stdout_log": godot_path_string(&result.stdout_log),
-                    "stderr_log": godot_path_string(&result.stderr_log)
-                }
+                "warning": "Godot mono crashed during editor import because .NET/hostfxr is unavailable. The project has no C# files, so the diagnostic is non-blocking."
             }));
         }
         return Err(godot::godot_failed(&result));
@@ -114,11 +57,7 @@ pub fn run_import(ctx: &AppContext, _args: &ImportArgs) -> GdxResult<serde_json:
         "ok": true,
         "command": "asset.import",
         "project": godot_path_string(&project.root),
-        "imported": true,
-        "artifacts": {
-            "stdout_log": godot_path_string(&result.stdout_log),
-            "stderr_log": godot_path_string(&result.stderr_log)
-        }
+        "imported": true
     }))
 }
 

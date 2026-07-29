@@ -1,16 +1,13 @@
-use std::collections::BTreeSet;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
 use crate::cli::Cli;
-use crate::diagnostics::{LogSummary, WarningMode};
 use crate::error::{GdxError, GdxResult};
 use crate::godot;
 use crate::progress::ProgressReporter;
-use crate::project::{assert_project, Project};
-use crate::run_store;
+use crate::project::{assert_project, godot_path_string, Project};
 
 #[derive(Debug, Clone)]
 pub struct AppContext {
@@ -20,14 +17,6 @@ pub struct AppContext {
     pub project: Option<PathBuf>,
     pub cwd: PathBuf,
     pub progress: ProgressReporter,
-    pub warnings: WarningMode,
-    state: Arc<Mutex<ExecutionState>>,
-}
-
-#[derive(Debug, Default)]
-struct ExecutionState {
-    projects_with_runs: BTreeSet<PathBuf>,
-    log_summary: LogSummary,
 }
 
 impl AppContext {
@@ -42,8 +31,6 @@ impl AppContext {
             project,
             cwd,
             progress: ProgressReporter::off(),
-            warnings: WarningMode::Summary,
-            state: Arc::new(Mutex::new(ExecutionState::default())),
         })
     }
 
@@ -53,7 +40,6 @@ impl AppContext {
         value.godot_standard = cli.godot_standard.clone();
         value.godot_dotnet = cli.godot_dotnet.clone();
         value.progress = progress;
-        value.warnings = cli.warnings;
         Ok(value)
     }
 
@@ -78,26 +64,7 @@ impl AppContext {
     }
 
     pub fn run_godot(&self, command: godot::GodotCommand) -> GdxResult<godot::GodotRunResult> {
-        let project = command.project.clone();
-        let result = godot::run(command, &self.progress, self.warnings);
-        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
-        state.projects_with_runs.insert(project);
-        if let Ok(value) = &result {
-            state.log_summary.merge(&value.log_summary);
-        } else if let Err(error) = &result {
-            let summary = error
-                .context
-                .details
-                .as_ref()
-                .and_then(|details| details.get("diagnostics"))
-                .and_then(|diagnostics| diagnostics.get("log_summary"))
-                .cloned()
-                .and_then(|value| serde_json::from_value::<LogSummary>(value).ok());
-            if let Some(summary) = summary {
-                state.log_summary.merge(&summary);
-            }
-        }
-        result
+        godot::run(command, &self.progress)
     }
 
     pub fn abs_path(&self, path: &Path) -> PathBuf {
@@ -126,53 +93,12 @@ impl AppContext {
         if result.status_code != 0 {
             return Err(godot::godot_failed(&result));
         }
-        Ok(result.last_json.unwrap_or(Value::Null))
-    }
-
-    pub fn finalize_runs(&self) -> Value {
-        let projects = self
-            .state
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .projects_with_runs
-            .clone();
-        if projects.is_empty() {
-            return serde_json::json!({
-                "pruned_runs": 0,
-                "freed_bytes": 0,
-                "warnings": [],
-            });
+        let value = result.last_json.unwrap_or(Value::Null);
+        if value.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(value.get("result").cloned().unwrap_or(Value::Null))
+        } else {
+            Ok(value)
         }
-        let mut pruned = 0u64;
-        let mut freed = 0u64;
-        let mut warnings = Vec::new();
-        for project in projects {
-            let value = run_store::auto_prune(&project);
-            pruned += value["pruned_runs"].as_u64().unwrap_or(0);
-            freed += value["freed_bytes"].as_u64().unwrap_or(0);
-            if let Some(warning) = value.get("warning").and_then(Value::as_str) {
-                warnings.push(serde_json::json!({ "message": warning }));
-            }
-            if let Some(items) = value.get("warnings").and_then(Value::as_array) {
-                warnings.extend(items.iter().cloned());
-            }
-        }
-        serde_json::json!({
-            "pruned_runs": pruned,
-            "freed_bytes": freed,
-            "warnings": warnings,
-        })
-    }
-
-    pub fn log_summary(&self) -> Value {
-        serde_json::to_value(
-            self.state
-                .lock()
-                .unwrap_or_else(|err| err.into_inner())
-                .log_summary
-                .filtered(self.warnings),
-        )
-        .unwrap_or(Value::Null)
     }
 }
 
@@ -200,18 +126,71 @@ pub fn validate_res_path(label: &str, value: &str) -> GdxResult<()> {
 
 pub fn read_json_file(ctx: &AppContext, path: &Path) -> GdxResult<Value> {
     let path = ctx.abs_path(path);
-    let text = std::fs::read_to_string(&path).map_err(|err| {
+    let bytes = std::fs::read(&path).map_err(|err| {
         GdxError::tool(
             "io_failed",
             format!("Cannot read {}: {err}", path.display()),
         )
     })?;
-    serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|err| {
+    parse_json_bytes(&bytes, &godot_path_string(&path), "invalid_json")
+}
+
+pub fn read_json_stdin(error_code: &str) -> GdxResult<Value> {
+    let mut bytes = Vec::new();
+    io::stdin()
+        .read_to_end(&mut bytes)
+        .map_err(|err| GdxError::tool("io_failed", format!("Cannot read stdin: {err}")))?;
+    parse_json_bytes(&bytes, "stdin", error_code)
+}
+
+pub fn parse_json_text(text: &str, origin: &str, error_code: &str) -> GdxResult<Value> {
+    parse_json_utf8(text.trim_start_matches('\u{feff}'), origin, error_code)
+}
+
+pub fn parse_json_bytes(bytes: &[u8], origin: &str, error_code: &str) -> GdxResult<Value> {
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    let text = std::str::from_utf8(bytes).map_err(|err| {
         GdxError::user(
-            "invalid_json",
-            format!("{} must contain valid JSON: {err}", path.display()),
+            "invalid_utf8",
+            format!("{origin} must be UTF-8 with an optional UTF-8 BOM"),
         )
+        .with_details(serde_json::json!({
+            "input_origin": origin,
+            "byte_offset": err.valid_up_to(),
+        }))
+        .with_suggestion("Write JSON as UTF-8 without BOM, or with a UTF-8 BOM.")
+    })?;
+    parse_json_utf8(text, origin, error_code)
+}
+
+fn parse_json_utf8(text: &str, origin: &str, error_code: &str) -> GdxResult<Value> {
+    serde_json::from_str(text).map_err(|err| {
+        let byte_offset = byte_offset_for_line_column(text, err.line(), err.column());
+        GdxError::user(
+            error_code,
+            format!("{origin} must contain valid JSON: {err}"),
+        )
+        .with_details(serde_json::json!({
+            "input_origin": origin,
+            "line": err.line(),
+            "column": err.column(),
+            "byte_offset": byte_offset,
+        }))
     })
+}
+
+fn byte_offset_for_line_column(text: &str, line: usize, column: usize) -> usize {
+    let line_start = text
+        .split_inclusive('\n')
+        .take(line.saturating_sub(1))
+        .map(str::len)
+        .sum::<usize>();
+    line_start
+        + text[line_start..]
+            .char_indices()
+            .nth(column.saturating_sub(1))
+            .map(|(index, _)| index)
+            .unwrap_or_else(|| text[line_start..].len())
 }
 
 #[cfg(test)]
@@ -273,5 +252,29 @@ mod tests {
         let value = read_json_file(&ctx, &path).unwrap();
         assert_eq!(value["text"], "中文");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn reports_json_origin_and_position() {
+        let error = parse_json_text("[\"ok\",]", "--args-json", "invalid_args_json").unwrap_err();
+
+        assert_eq!(error.error, "invalid_args_json");
+        let details = error.context.details.unwrap();
+        assert_eq!(details["input_origin"], "--args-json");
+        assert!(details["line"].as_u64().unwrap() >= 1);
+        assert!(details["column"].as_u64().unwrap() >= 1);
+        assert!(details.get("preview").is_none());
+    }
+
+    #[test]
+    fn rejects_non_utf8_json_with_dedicated_error() {
+        let error =
+            parse_json_bytes(&[b'{', 0xFF, b'}'], "fixture.json", "invalid_json").unwrap_err();
+
+        assert_eq!(error.error, "invalid_utf8");
+        assert_eq!(
+            error.context.details.unwrap()["input_origin"],
+            "fixture.json"
+        );
     }
 }
