@@ -12,7 +12,7 @@ gdx doctor
 
 If `gdx` is not on `PATH`, use the repo binary after `cargo build --workspace`. If Godot is not found, set `GDX_GODOT` or pass `--godot`. For mixed projects, configure `GDX_GODOT_STANDARD` and `GDX_GODOT_DOTNET`; explicit `--godot` always wins.
 
-`gdx doctor` identifies GDScript/C# projects, the selected standard/.NET Godot build, and installed .NET SDKs. A GDScript-only project using .NET Godot without an SDK is a warning. A C# project without a .NET-enabled Godot build or a .NET 8+ SDK fails before project execution.
+`gdx doctor` identifies GDScript/C# projects, the selected standard/.NET Godot build, and installed .NET SDKs. A GDScript-only project using .NET Godot without an SDK is reported by `doctor` as a non-blocking environment suggestion, but it is omitted from ordinary runtime and daemon failure diagnostics. A C# project without a .NET-enabled Godot build or a .NET 8+ SDK fails before project execution.
 
 ## A long command appears stuck
 
@@ -78,6 +78,14 @@ gdx --project .\demo daemon stop --force
 Daemon session data and current logs live under the current user's OS temporary directory, keyed by canonical project path. `daemon stop` and stale-session detection clean them automatically. Existing legacy `.gdx/daemon` directories are not daemon state for current gdx releases.
 
 If `daemon start` reports `project_unhealthy`, inspect `health.first_error` and the attached daemon logs. Parsing, resource, and scene-load errors block startup and the newly started daemon is stopped automatically. Missing .NET SDK messages from a GDScript-only project are treated as environment warnings. Use `--no-health-check` only for deliberate diagnostics; it returns `project_healthy: null`.
+
+The daemon records a content snapshot of active `.gd` files when it starts. If a script is added, modified, or removed, ordinary RPC commands and `daemon start` without `--restart` fail with `daemon_scripts_stale`; `daemon status` reports `script_sync.status: "stale"` and bounded `res://` paths. The daemon stays available for inspection and `daemon stop`. Restart it explicitly before repeating state setup, verification, or capture:
+
+```powershell
+gdx --project .\demo daemon start --restart
+```
+
+If a project method returns INF, -INF, or NaN, the daemon rejects that response with `daemon_non_finite_response` instead of emitting invalid JSON. Read `details.non_finite_values`; each entry contains an RFC 6901 path relative to the RPC result and a `kind` of `positive_infinity`, `negative_infinity`, or `nan`. Fix the project method to return finite JSON-compatible data.
 
 ## A legacy `.gdx/runs` directory consumes disk space
 

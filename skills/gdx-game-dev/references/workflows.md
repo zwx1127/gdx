@@ -84,6 +84,8 @@ gdx --project .\demo capture daemon --out .\artifacts\after-edit.png
 gdx --project .\demo daemon stop
 ```
 
+The daemon snapshots active `.gd` files when it starts. After editing scripts, `daemon status` reports `script_sync.status: "stale"` and ordinary RPC fails with `daemon_scripts_stale`; restart explicitly and repeat any state-setup calls before taking screenshots. Project methods must return finite JSON-compatible numbers. Use `details.non_finite_values` from `daemon_non_finite_response` to locate INF, -INF, or NaN values.
+
 ## Runtime Verification
 
 Expose structured state from gameplay scripts:

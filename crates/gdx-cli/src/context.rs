@@ -64,7 +64,8 @@ impl AppContext {
     }
 
     pub fn run_godot(&self, command: godot::GodotCommand) -> GdxResult<godot::GodotRunResult> {
-        godot::run(command, &self.progress)
+        let project_has_csharp = self.project.as_deref().map(godot::project_has_csharp);
+        godot::run(command, &self.progress, project_has_csharp)
     }
 
     pub fn abs_path(&self, path: &Path) -> PathBuf {

@@ -71,16 +71,40 @@ impl LogSummary {
         self.recount_unique();
     }
 
-    pub fn apply_project_context(&mut self, csharp_project: bool) {
+    pub fn apply_project_context(&mut self, csharp_project: Option<bool>) {
         for record in &mut self.groups {
             classify_record_context(record, csharp_project);
         }
-        if let Some(record) = &mut self.first_error {
-            classify_record_context(record, csharp_project);
+        if csharp_project == Some(false) {
+            let removed_errors = self
+                .groups
+                .iter()
+                .filter(|record| record.code == "dotnet_sdk_missing" && record.severity == "error")
+                .map(|record| record.count)
+                .sum::<u64>();
+            let removed_warnings = self
+                .groups
+                .iter()
+                .filter(|record| {
+                    record.code == "dotnet_sdk_missing" && record.severity == "warning"
+                })
+                .map(|record| record.count)
+                .sum::<u64>();
+            self.groups
+                .retain(|record| record.code != "dotnet_sdk_missing");
+            self.errors = self.errors.saturating_sub(removed_errors);
+            self.warnings = self.warnings.saturating_sub(removed_warnings);
         }
-        if let Some(record) = &mut self.first_warning {
-            classify_record_context(record, csharp_project);
-        }
+        self.first_error = self
+            .groups
+            .iter()
+            .find(|record| record.severity == "error")
+            .cloned();
+        self.first_warning = self
+            .groups
+            .iter()
+            .find(|record| record.severity == "warning")
+            .cloned();
         self.recount_unique();
     }
 
@@ -91,12 +115,10 @@ impl LogSummary {
         value
     }
 
-    pub fn first_hard_error(&self, csharp_project: bool) -> Option<&LogRecord> {
-        self.groups.iter().find(|record| {
-            record.severity == "error"
-                && record.blocking
-                && (csharp_project || record.code != "dotnet_sdk_missing")
-        })
+    pub fn first_hard_error(&self) -> Option<&LogRecord> {
+        self.groups
+            .iter()
+            .find(|record| record.severity == "error" && record.blocking)
     }
 
     fn recount_unique(&mut self) {
@@ -133,7 +155,7 @@ fn default_blocking() -> bool {
     true
 }
 
-fn classify_record_context(record: &mut LogRecord, csharp_project: bool) {
+fn classify_record_context(record: &mut LogRecord, csharp_project: Option<bool>) {
     record.source = match record.code.as_str() {
         "dotnet_sdk_missing" | "filesystem_unavailable" => "environment",
         "gdscript_warning_as_error"
@@ -143,7 +165,7 @@ fn classify_record_context(record: &mut LogRecord, csharp_project: bool) {
         _ => "godot",
     }
     .to_string();
-    record.blocking = record.code != "dotnet_sdk_missing" || csharp_project;
+    record.blocking = record.code != "dotnet_sdk_missing" || csharp_project != Some(false);
 }
 
 pub fn attach_log_diagnostics(
@@ -151,17 +173,40 @@ pub fn attach_log_diagnostics(
     stdout_log: &Path,
     stderr_log: &Path,
 ) -> GdxError {
-    let diagnostics = diagnose_logs(stdout_log, stderr_log);
+    let diagnostics = diagnose_logs_with_context(stdout_log, stderr_log, None);
     if diagnostics != Value::Null {
         error.insert_detail("diagnostics", diagnostics);
     }
     error
 }
 
+pub fn attach_log_diagnostics_with_context(
+    mut error: GdxError,
+    stdout_log: &Path,
+    stderr_log: &Path,
+    csharp_project: Option<bool>,
+) -> GdxError {
+    let diagnostics = diagnose_logs_with_context(stdout_log, stderr_log, csharp_project);
+    if diagnostics != Value::Null {
+        error.insert_detail("diagnostics", diagnostics);
+    }
+    error
+}
+
+#[cfg(test)]
 pub fn diagnose_logs(stdout_log: &Path, stderr_log: &Path) -> Value {
-    let stdout_tail = read_tail(stdout_log);
-    let stderr_tail = read_tail(stderr_log);
-    let summary = summarize_logs(stdout_log, stderr_log);
+    diagnose_logs_with_context(stdout_log, stderr_log, None)
+}
+
+fn diagnose_logs_with_context(
+    stdout_log: &Path,
+    stderr_log: &Path,
+    csharp_project: Option<bool>,
+) -> Value {
+    let stdout_tail = read_tail_with_context(stdout_log, csharp_project);
+    let stderr_tail = read_tail_with_context(stderr_log, csharp_project);
+    let mut summary = summarize_logs(stdout_log, stderr_log);
+    summary.apply_project_context(csharp_project);
     if summary.errors == 0
         && summary.warnings == 0
         && stdout_tail.is_empty()
@@ -196,16 +241,34 @@ pub fn classify_logs(stdout_log: &Path, stderr_log: &Path) -> Option<&'static st
         .map(|record| static_code(&record.code))
 }
 
+#[cfg(test)]
 pub fn read_tail(path: &Path) -> String {
+    read_tail_with_context(path, None)
+}
+
+fn read_tail_with_context(path: &Path, csharp_project: Option<bool>) -> String {
     let Ok(file) = File::open(path) else {
         return String::new();
     };
     let mut lines = VecDeque::with_capacity(MAX_TAIL_LINES);
+    let mut suppress_dotnet_location = false;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let trimmed = line.trim_end();
+        if csharp_project == Some(false) {
+            if classify_message(trimmed) == "dotnet_sdk_missing" {
+                suppress_dotnet_location = true;
+                continue;
+            }
+            if suppress_dotnet_location && trimmed.trim_start().starts_with("at:") {
+                suppress_dotnet_location = false;
+                continue;
+            }
+            suppress_dotnet_location = false;
+        }
         if lines.len() == MAX_TAIL_LINES {
             lines.pop_front();
         }
-        lines.push_back(truncate_text(line.trim_end(), MAX_DIAGNOSTIC_CHARS));
+        lines.push_back(truncate_text(trimmed, MAX_DIAGNOSTIC_CHARS));
     }
     lines.into_iter().collect::<Vec<_>>().join("\n")
 }
@@ -443,8 +506,8 @@ mod tests {
     }
 
     #[test]
-    fn dotnet_error_is_nonfatal_for_gdscript_projects() {
-        let mut summary = LogSummary {
+    fn dotnet_error_is_hidden_for_gdscript_and_blocking_for_csharp() {
+        let summary = LogSummary {
             errors: 1,
             groups: vec![LogRecord {
                 severity: "error".into(),
@@ -455,13 +518,64 @@ mod tests {
             }],
             ..LogSummary::default()
         };
-        summary.apply_project_context(false);
-        assert!(summary.first_hard_error(false).is_none());
-        assert_eq!(summary.blocking_errors, 0);
-        assert_eq!(summary.non_blocking_diagnostics, 1);
-        summary.apply_project_context(true);
-        assert!(summary.first_hard_error(true).is_some());
-        assert_eq!(summary.blocking_errors, 1);
+        let mut gdscript = summary.clone();
+        gdscript.apply_project_context(Some(false));
+        assert!(gdscript.first_hard_error().is_none());
+        assert_eq!(gdscript.errors, 0);
+        assert!(gdscript.groups.is_empty());
+
+        let mut csharp = summary;
+        csharp.apply_project_context(Some(true));
+        assert!(csharp.first_hard_error().is_some());
+        assert_eq!(csharp.blocking_errors, 1);
+    }
+
+    #[test]
+    fn gdscript_diagnostics_hide_dotnet_tail_but_keep_other_errors() {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_dotnet_tail_{}_{}.log",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(
+            &path,
+            "ERROR: .NET SDK not found\n   at: modules/mono/mono_gd/gd_mono.cpp:1\nERROR: Parse Error: broken script\n",
+        )
+        .unwrap();
+
+        let diagnostics = diagnose_logs_with_context(&path, Path::new("missing"), Some(false));
+
+        assert_eq!(diagnostics["primary_error"], "gdscript_parse_error");
+        assert!(!diagnostics["stdout_tail"]
+            .as_str()
+            .unwrap()
+            .contains(".NET"));
+        assert!(diagnostics["stdout_tail"]
+            .as_str()
+            .unwrap()
+            .contains("Parse Error"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn dotnet_only_diagnostic_is_hidden_for_gdscript_but_retained_without_context() {
+        let path = std::env::temp_dir().join(format!(
+            "gdx_dotnet_only_{}_{}.log",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(
+            &path,
+            "ERROR: Failed to load hostfxr\n   at: modules/mono/mono_gd/gd_mono.cpp:1\n",
+        )
+        .unwrap();
+
+        let gdscript = diagnose_logs_with_context(&path, Path::new("missing"), Some(false));
+        let unscoped = diagnose_logs(&path, Path::new("missing"));
+
+        assert_eq!(gdscript, Value::Null);
+        assert_eq!(unscoped["primary_error"], "dotnet_sdk_missing");
+        let _ = fs::remove_file(path);
     }
 
     #[test]

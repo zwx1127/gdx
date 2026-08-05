@@ -106,6 +106,8 @@ gdx --project .\demo state get --target / --method gdx_state
 
 `state get --target /` defaults to `gdx_state()` when no method or property is supplied, and its result says whether the value came from a method or property.
 
+Return only finite, JSON-compatible numbers from project methods. INF, -INF, and NaN produce `daemon_non_finite_response`; use the RFC 6901 paths in `details.non_finite_values` to repair the project state method. The daemon snapshots active `.gd` contents at startup. If an RPC reports `daemon_scripts_stale`, inspect `daemon status`, run `daemon start --restart`, and recreate any runtime state before validation or capture.
+
 For UI flows, prefer `input click-node`, `input activate`, and project-level methods invoked with `call invoke`. Use coordinate clicks only when coordinates are part of the test. For mobile gameplay that listens to touch events, use `input tap`, `input drag`, `input pinch`, or `input sequence` instead of mouse clicks. Touch commands require `touch_sequence`; if they report `daemon_runtime_outdated`, run `project update --check`, update the managed runtime, and restart the daemon.
 
 For animation review, use `capture record --out artifacts/recording.avi --duration 3 --fps 60` after selecting the scene state you want to launch. Add `--input-sequence <json>` to replay touch events during recording. This uses Godot Movie Writer and records a freshly started scene, not the current daemon session.

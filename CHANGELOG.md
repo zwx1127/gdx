@@ -13,6 +13,8 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - Project-aware standard/.NET Godot selection and .NET SDK checks in `doctor`.
 - Doctor provenance for executable path, CLI version, build commit, and managed daemon runtime compatibility.
 - Daemon startup health checks for RPC capabilities, scene loading, and hard project errors.
+- Daemon GDScript content snapshots with explicit stale-source errors and `script_sync` status reporting.
+- Structured `daemon_non_finite_response` diagnostics with RFC 6901 paths for INF, -INF, and NaN values.
 - Repeatable string `--arg`, `--args-json -` stdin support, and source-positioned parse diagnostics.
 - Bilingual open-source documentation for users, AI agents, and contributors.
 - Standard contribution, security, changelog, and dual-license files.
@@ -22,7 +24,7 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - gdx is stateless: success is one compact stdout JSON object, while progress and failures use stderr.
 - One-shot Godot children use managed process trees and temporary logs so cancellation and timeouts do not leave descendants or project-local history behind.
 - Log diagnostics stream large files, retain a bounded failure tail, and aggregate repeated messages without loading complete logs into memory.
-- Environment diagnostics distinguish blocking project errors from non-blocking host diagnostics, including Mono without an SDK for GDScript-only projects.
+- Environment diagnostics keep Mono/.NET SDK suggestions for GDScript-only projects in `doctor` while omitting them from ordinary runtime and daemon failure diagnostics.
 - Daemon startup now rejects missing or mismatched managed runtime files before spawning Godot.
 - Daemon session state and current logs now live in a per-user OS temporary directory and are removed on stop, stale detection, or failed startup.
 - `project update` is the single managed-addon install/update command; `project inspect`, daemon status, verify, and script-check results are compact summaries.

@@ -291,6 +291,7 @@ pub fn run_start(ctx: &AppContext, args: &StartArgs) -> GdxResult<serde_json::Va
     if let Ok(existing) = daemon::read_session(&project.root) {
         if daemon::ping_session(&existing) {
             if !args.restart {
+                daemon::ensure_session_scripts_fresh(&project.root, &existing)?;
                 let capabilities = capabilities_for_status(&existing);
                 let health = health_for_start(
                     &existing,
@@ -398,6 +399,7 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
                     },
                 );
                 response["stale_session_removed"] = json!(true);
+                response["script_sync"] = Value::Null;
                 return Ok(response);
             }
             let capabilities = if running {
@@ -411,7 +413,8 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
                 2,
                 crate::godot::project_has_csharp(&project.root),
             );
-            Ok(daemon_session_response(
+            let script_sync = daemon::script_sync_status(&project.root, &session)?;
+            let mut response = daemon_session_response(
                 "daemon.status",
                 &project.root,
                 running,
@@ -419,11 +422,13 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
                 Some(&session),
                 capabilities,
                 health,
-            ))
+            );
+            response["script_sync"] = json!(script_sync);
+            Ok(response)
         }
         Err(_) => {
             daemon::remove_session(&project.root);
-            Ok(daemon_session_response(
+            let mut response = daemon_session_response(
                 "daemon.status",
                 &project.root,
                 false,
@@ -438,7 +443,9 @@ pub fn run_status(ctx: &AppContext, _args: &StatusArgs) -> GdxResult<serde_json:
                     first_error: None,
                     health_check_duration_ms: 0,
                 },
-            ))
+            );
+            response["script_sync"] = Value::Null;
+            Ok(response)
         }
     }
 }
@@ -535,8 +542,8 @@ fn check_daemon_health(
         Path::new(&session.stdout_log),
         Path::new(&session.stderr_log),
     );
-    summary.apply_project_context(csharp_project);
-    let hard_error = summary.first_hard_error(csharp_project).cloned();
+    summary.apply_project_context(Some(csharp_project));
+    let hard_error = summary.first_hard_error().cloned();
     let scene_root = tree.as_ref().ok().and_then(|value| {
         value
             .get("path")
@@ -1182,6 +1189,7 @@ mod tests {
             stdout_log: "temp/stdout.log".to_string(),
             stderr_log: "temp/stderr.log".to_string(),
             started_at: 1,
+            script_snapshot: None,
         };
         let capabilities = json!({
             "status": "known",

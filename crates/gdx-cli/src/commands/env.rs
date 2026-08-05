@@ -172,15 +172,19 @@ fn godot_version(ctx: &AppContext, binary: &Path) -> GdxResult<String> {
     if ctx.project.is_none() {
         return crate::godot::run_version(binary, 10, &ctx.progress);
     }
-    let result = ctx.run_godot(GodotCommand {
-        binary: binary.to_path_buf(),
-        args: vec!["--version".to_string()],
-        envs: Vec::new(),
-        timeout_secs: 10,
-        deadline: None,
-        operation: "doctor.version".to_string(),
-        subject: Some("godot --version".to_string()),
-    })?;
+    let result = crate::godot::run(
+        GodotCommand {
+            binary: binary.to_path_buf(),
+            args: vec!["--version".to_string()],
+            envs: Vec::new(),
+            timeout_secs: 10,
+            deadline: None,
+            operation: "doctor.version".to_string(),
+            subject: Some("godot --version".to_string()),
+        },
+        &ctx.progress,
+        None,
+    )?;
     if result.status_code != 0 {
         return Err(crate::godot::godot_failed(&result));
     }

@@ -108,6 +108,8 @@ UI 流程优先使用 `input click-node`、`input activate` 和通过 `call invo
 
 `state get --target /` 在未传 `method` 或 `property` 时默认调用 `gdx_state()`，返回结果会标明 state 来自 method 还是 property。
 
+项目方法只能返回有限、JSON 兼容的数值。INF、-INF 和 NaN 会产生 `daemon_non_finite_response`；使用 `details.non_finite_values` 中的 RFC 6901 路径修正状态方法。daemon 会在启动时记录有效 `.gd` 内容快照。RPC 返回 `daemon_scripts_stale` 时，先检查 `daemon status`，再执行 `daemon start --restart`，并在验证或截图前重建所需运行状态。
+
 Touch 命令要求 daemon runtime 提供 `touch_sequence`；如果报告 `daemon_runtime_outdated`，先运行 `project update --check`，再更新 managed runtime 并重启 daemon。不要把 touch 手势改写成鼠标事件来绕过旧 runtime。
 
 需要审阅动画节奏时，使用 `capture record --out artifacts/recording.avi --duration 3 --fps 60`。增加 `--input-sequence <json>` 可以在录制时回放 touch 事件。它通过 Godot Movie Writer 录制重新启动的场景，不会录制当前 daemon session。

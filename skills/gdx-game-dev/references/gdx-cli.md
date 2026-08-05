@@ -48,7 +48,9 @@ gdx --project .\demo daemon stop
 
 Use `input drag` for swipe motion and `input send --pressed false` for release. Typed call arguments use a JSON array passed to `--args-json`; `-` reads stdin.
 
-Daemon session metadata and current logs live in a per-user OS temporary directory, not the project. Active daemon responses expose concise `runtime`, `health`, and current log artifacts, but not token or full capabilities.
+Daemon session metadata and current logs live in a per-user OS temporary directory, not the project. Active daemon responses expose concise `runtime`, `health`, and current log artifacts, but not token or full capabilities. `daemon status` also reports `script_sync`; stale `.gd` contents block ordinary RPC with `daemon_scripts_stale` until an explicit restart.
+
+Project RPC methods must return finite JSON-compatible numbers. INF, -INF, or NaN produces `daemon_non_finite_response` with RFC 6901 paths in `details.non_finite_values`.
 
 ## Verification and artifacts
 

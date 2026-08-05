@@ -10,7 +10,7 @@ gdx doctor
 
 如果 Godot 不在 `PATH`，设置 `GDX_GODOT` 或传入 `--godot`。混合环境可分别配置 `GDX_GODOT_STANDARD` 与 `GDX_GODOT_DOTNET`；显式 `--godot` 优先。
 
-`doctor` 会识别 GDScript/C#、选中的标准/.NET Godot 以及已安装 SDK。C# 项目缺少 .NET Godot 或 .NET 8+ SDK 时会在执行项目命令前失败。
+`doctor` 会识别 GDScript/C#、选中的标准/.NET Godot 以及已安装 SDK。纯 GDScript 项目使用 Mono Godot 且缺少 SDK 时，只由 `doctor` 返回非阻塞环境建议；普通运行和 daemon 失败诊断会隐藏这条噪声。C# 项目缺少 .NET Godot 或 .NET 8+ SDK 时仍会在执行项目命令前失败。
 
 ## 长命令看起来卡住
 
@@ -57,6 +57,14 @@ gdx --project .\demo daemon stop --force
 活动 daemon 的 session 与当前日志位于按项目规范路径散列的用户 OS 临时目录中。`daemon stop` 和陈旧 session 检测会自动清理。旧版本留下的 `.gdx/daemon` 不再是当前 daemon 状态。
 
 `project_unhealthy` 时检查 `health.first_error`。新启动的异常 daemon 会自动停止；已经运行的异常 daemon 保留给开发者检查或显式停止。`--no-health-check` 只用于诊断。
+
+daemon 启动时会记录有效 `.gd` 文件的内容快照。脚本新增、修改或删除后，普通 RPC 以及不带 `--restart` 的 `daemon start` 会返回 `daemon_scripts_stale`；`daemon status` 通过 `script_sync.status: "stale"` 和有界的 `res://` 路径报告差异。daemon 仍可检查和停止。重新设置状态、验证或截图前必须显式重启：
+
+```powershell
+gdx --project .\demo daemon start --restart
+```
+
+项目方法返回 INF、-INF 或 NaN 时，daemon 返回 `daemon_non_finite_response`，不会再发送非法 JSON。`details.non_finite_values` 中每项包含相对于 RPC 结果的 RFC 6901 路径，以及 `positive_infinity`、`negative_infinity` 或 `nan` 类型。应修正项目方法，使其只返回有限、JSON 兼容的数据。
 
 ## 旧 `.gdx/runs` 占用磁盘
 

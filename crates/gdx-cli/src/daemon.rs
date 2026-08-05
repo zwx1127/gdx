@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -14,11 +15,29 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::constants::GDX_DAEMON_SERVER_RES;
-use crate::diagnostics::attach_log_diagnostics;
+use crate::diagnostics::attach_log_diagnostics_with_context;
 use crate::error::{GdxError, GdxResult};
 use crate::project::{ensure_dir, godot_path_string};
+use crate::traversal::is_generated_path;
 
 pub const RUNTIME_UPDATE_SUGGESTION: &str = "Run `gdx --project <project> project update --check` to inspect managed runtime file changes, then run `gdx --project <project> project update` and restart the daemon with `gdx --project <project> daemon start --restart`.";
+const MAX_SCRIPT_CHANGE_PATHS: usize = 50;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScriptSnapshot {
+    pub files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScriptSyncStatus {
+    pub status: &'static str,
+    pub snapshot_present: bool,
+    pub total_changes: usize,
+    pub added: Vec<String>,
+    pub modified: Vec<String>,
+    pub removed: Vec<String>,
+    pub paths_truncated: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonSession {
@@ -29,6 +48,8 @@ pub struct DaemonSession {
     pub stdout_log: String,
     pub stderr_log: String,
     pub started_at: u64,
+    #[serde(default)]
+    pub script_snapshot: Option<ScriptSnapshot>,
 }
 
 pub fn runtime_dir(project: &Path) -> PathBuf {
@@ -85,8 +106,151 @@ pub fn remove_session(project: &Path) {
 
 pub fn rpc(project: &Path, method: &str, params: Value, timeout_secs: u64) -> GdxResult<Value> {
     let session = read_session(project)?;
+    ensure_session_scripts_fresh(project, &session)?;
     rpc_session(&session, method, params, timeout_secs)
         .map_err(|err| enrich_rpc_error(err, project, method))
+}
+
+pub fn ensure_session_scripts_fresh(project: &Path, session: &DaemonSession) -> GdxResult<()> {
+    let sync = script_sync_status(project, session)?;
+    if sync.status == "fresh" {
+        return Ok(());
+    }
+
+    let message = if sync.status == "unknown" {
+        "The running daemon has no GDScript source snapshot"
+    } else {
+        "GDScript sources changed after the daemon started"
+    };
+    Err(GdxError::tool("daemon_scripts_stale", message)
+        .with_stage("daemon_script_sync")
+        .with_details(json!(sync))
+        .with_suggestion(format!(
+            "Restart the daemon with `gdx --project {} daemon start --restart`.",
+            godot_path_string(project)
+        )))
+}
+
+pub fn script_sync_status(project: &Path, session: &DaemonSession) -> GdxResult<ScriptSyncStatus> {
+    let Some(previous) = session.script_snapshot.as_ref() else {
+        return Ok(ScriptSyncStatus {
+            status: "unknown",
+            snapshot_present: false,
+            total_changes: 0,
+            added: Vec::new(),
+            modified: Vec::new(),
+            removed: Vec::new(),
+            paths_truncated: false,
+        });
+    };
+    let current = capture_script_snapshot(project)?;
+    Ok(compare_script_snapshots(previous, &current))
+}
+
+fn capture_script_snapshot(project: &Path) -> GdxResult<ScriptSnapshot> {
+    let mut files = BTreeMap::new();
+    let walker = walkdir::WalkDir::new(project)
+        .into_iter()
+        .filter_entry(|entry| {
+            !is_generated_path(project, entry.path())
+                && (!entry.file_type().is_dir()
+                    || entry.path() == project
+                    || !entry.path().join(".gdignore").is_file())
+        });
+    for entry in walker {
+        let entry = entry.map_err(|err| {
+            GdxError::tool(
+                "daemon_script_sync_failed",
+                format!("Cannot inspect GDScript sources: {err}"),
+            )
+            .with_stage("daemon_script_sync")
+        })?;
+        if !entry.file_type().is_file()
+            || entry
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| !extension.eq_ignore_ascii_case("gd"))
+                .unwrap_or(true)
+        {
+            continue;
+        }
+        let contents = fs::read(entry.path()).map_err(|err| {
+            GdxError::tool(
+                "daemon_script_sync_failed",
+                format!("Cannot read {}: {err}", entry.path().display()),
+            )
+            .with_stage("daemon_script_sync")
+            .with_subject(godot_path_string(entry.path()))
+        })?;
+        let relative = entry.path().strip_prefix(project).map_err(|err| {
+            GdxError::tool(
+                "daemon_script_sync_failed",
+                format!(
+                    "Cannot resolve {} relative to project: {err}",
+                    entry.path().display()
+                ),
+            )
+            .with_stage("daemon_script_sync")
+        })?;
+        let path = format!("res://{}", godot_path_string(relative));
+        files.insert(path, content_hash(&contents));
+    }
+    Ok(ScriptSnapshot { files })
+}
+
+fn compare_script_snapshots(
+    previous: &ScriptSnapshot,
+    current: &ScriptSnapshot,
+) -> ScriptSyncStatus {
+    let mut changes: Vec<(&'static str, String)> = Vec::new();
+    for (path, hash) in &current.files {
+        match previous.files.get(path) {
+            None => changes.push(("added", path.clone())),
+            Some(previous_hash) if previous_hash != hash => {
+                changes.push(("modified", path.clone()))
+            }
+            Some(_) => {}
+        }
+    }
+    for path in previous.files.keys() {
+        if !current.files.contains_key(path) {
+            changes.push(("removed", path.clone()));
+        }
+    }
+    changes.sort_by(|left, right| left.1.cmp(&right.1).then(left.0.cmp(right.0)));
+
+    let total_changes = changes.len();
+    let mut added = Vec::new();
+    let mut modified = Vec::new();
+    let mut removed = Vec::new();
+    for (kind, path) in changes.into_iter().take(MAX_SCRIPT_CHANGE_PATHS) {
+        match kind {
+            "added" => added.push(path),
+            "modified" => modified.push(path),
+            "removed" => removed.push(path),
+            _ => unreachable!(),
+        }
+    }
+
+    ScriptSyncStatus {
+        status: if total_changes == 0 { "fresh" } else { "stale" },
+        snapshot_present: true,
+        total_changes,
+        added,
+        modified,
+        removed,
+        paths_truncated: total_changes > MAX_SCRIPT_CHANGE_PATHS,
+    }
+}
+
+fn content_hash(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 pub fn rpc_session(
@@ -164,6 +328,12 @@ pub fn rpc_session(
 }
 
 fn enrich_rpc_error(mut error: GdxError, project: &Path, method: &str) -> GdxError {
+    if error.error == "daemon_invalid_response" {
+        error.insert_detail("requested_rpc_method", json!(method));
+        error.insert_detail("project", json!(godot_path_string(project)));
+        error.context.suggestion = Some(RUNTIME_UPDATE_SUGGESTION.to_string());
+        return error;
+    }
     if error.error != "unknown_method" {
         return error;
     }
@@ -221,6 +391,8 @@ pub struct SpawnDaemon {
 }
 
 pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
+    let script_snapshot = capture_script_snapshot(&args.project)?;
+    let project_has_csharp = crate::godot::project_has_csharp(&args.project);
     let daemon_dir = runtime_dir(&args.project);
     ensure_dir(&daemon_dir)?;
     let stdout_log = daemon_dir.join("godot.daemon.stdout.log");
@@ -275,6 +447,7 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs())
             .unwrap_or(0),
+        script_snapshot: Some(script_snapshot),
     };
 
     let started = Instant::now();
@@ -286,7 +459,12 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
                 .with_stage("daemon_start")
                 .with_child_pid(session.pid)
                 .with_elapsed_ms(started.elapsed().as_millis());
-            let error = attach_log_diagnostics(error, &stdout_log, &stderr_log);
+            let error = attach_log_diagnostics_with_context(
+                error,
+                &stdout_log,
+                &stderr_log,
+                Some(project_has_csharp),
+            );
             remove_session(&args.project);
             return Err(error);
         }
@@ -297,7 +475,12 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
                 "daemon_exited",
                 format!("Godot daemon exited early with status {status}"),
             );
-            let error = attach_log_diagnostics(error, &stdout_log, &stderr_log);
+            let error = attach_log_diagnostics_with_context(
+                error,
+                &stdout_log,
+                &stderr_log,
+                Some(project_has_csharp),
+            );
             remove_session(&args.project);
             return Err(error);
         }
@@ -309,10 +492,11 @@ pub fn spawn_daemon(args: SpawnDaemon) -> GdxResult<DaemonSession> {
 
     let _ = kill_process(child.id(), true);
     let _ = child.wait();
-    let error = attach_log_diagnostics(
+    let error = attach_log_diagnostics_with_context(
         GdxError::timeout("Timed out waiting for daemon to start"),
         &stdout_log,
         &stderr_log,
+        Some(project_has_csharp),
     );
     remove_session(&args.project);
     Err(error)
@@ -460,6 +644,109 @@ mod tests {
         let session = read_session(&project).unwrap();
 
         assert_eq!(session.port, 2);
+        assert!(session.script_snapshot.is_none());
         remove_session(&project);
+    }
+
+    #[test]
+    fn script_snapshot_reports_added_modified_removed_and_ignores_gdignore() {
+        let project = std::env::temp_dir().join(format!(
+            "gdx_daemon_scripts_{}_{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(project.join("scripts")).unwrap();
+        fs::create_dir_all(project.join("design")).unwrap();
+        fs::write(project.join("scripts/main.gd"), "extends Node\n").unwrap();
+        fs::write(project.join("scripts/removed.gd"), "extends Node\n").unwrap();
+        fs::write(project.join("design/.gdignore"), "").unwrap();
+        fs::write(project.join("design/reference.gd"), "extends Node\n").unwrap();
+
+        let previous = capture_script_snapshot(&project).unwrap();
+        assert_eq!(previous.files.len(), 2);
+        assert!(!previous.files.contains_key("res://design/reference.gd"));
+
+        fs::write(
+            project.join("scripts/main.gd"),
+            "extends Node\nfunc changed():\n    pass\n",
+        )
+        .unwrap();
+        fs::write(project.join("scripts/added.gd"), "extends Node\n").unwrap();
+        fs::remove_file(project.join("scripts/removed.gd")).unwrap();
+        fs::write(
+            project.join("design/reference.gd"),
+            "extends Node\nfunc ignored():\n    pass\n",
+        )
+        .unwrap();
+
+        let current = capture_script_snapshot(&project).unwrap();
+        let sync = compare_script_snapshots(&previous, &current);
+        assert_eq!(sync.status, "stale");
+        assert_eq!(sync.total_changes, 3);
+        assert_eq!(sync.added, vec!["res://scripts/added.gd".to_string()]);
+        assert_eq!(sync.modified, vec!["res://scripts/main.gd".to_string()]);
+        assert_eq!(sync.removed, vec!["res://scripts/removed.gd".to_string()]);
+        assert!(!sync.paths_truncated);
+
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn script_snapshot_change_details_are_bounded() {
+        let previous = ScriptSnapshot::default();
+        let mut current = ScriptSnapshot::default();
+        for index in 0..55 {
+            current.files.insert(
+                format!("res://scripts/{index:02}.gd"),
+                format!("hash-{index}"),
+            );
+        }
+
+        let sync = compare_script_snapshots(&previous, &current);
+
+        assert_eq!(sync.total_changes, 55);
+        assert_eq!(sync.added.len(), MAX_SCRIPT_CHANGE_PATHS);
+        assert!(sync.paths_truncated);
+    }
+
+    #[test]
+    fn invalid_rpc_response_keeps_code_and_adds_update_context() {
+        let error = GdxError::tool(
+            "daemon_invalid_response",
+            "Daemon returned invalid JSON: number out of range",
+        );
+
+        let enriched = enrich_rpc_error(error, Path::new("D:/Game"), "call_method");
+
+        assert_eq!(enriched.error, "daemon_invalid_response");
+        assert_eq!(
+            enriched.context.details.as_ref().unwrap()["requested_rpc_method"],
+            "call_method"
+        );
+        assert!(enriched
+            .context
+            .suggestion
+            .as_deref()
+            .unwrap()
+            .contains("project update --check"));
+    }
+
+    #[test]
+    fn legacy_session_without_snapshot_requires_restart() {
+        let session = DaemonSession {
+            pid: 1,
+            port: 2,
+            token: "token".into(),
+            scene: "res://main.tscn".into(),
+            stdout_log: "stdout.log".into(),
+            stderr_log: "stderr.log".into(),
+            started_at: 3,
+            script_snapshot: None,
+        };
+
+        let error = ensure_session_scripts_fresh(Path::new("D:/Game"), &session).unwrap_err();
+
+        assert_eq!(error.error, "daemon_scripts_stale");
+        assert_eq!(error.context.details.unwrap()["status"], "unknown");
     }
 }

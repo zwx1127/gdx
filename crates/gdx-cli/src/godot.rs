@@ -10,7 +10,9 @@ use tempfile::{Builder as TempFileBuilder, NamedTempFile};
 use uuid::Uuid;
 
 use crate::constants::GDX_TOOLS_AUTOMATION_RES;
-use crate::diagnostics::{attach_log_diagnostics, classify_logs};
+use crate::diagnostics::{
+    attach_log_diagnostics, attach_log_diagnostics_with_context, classify_logs,
+};
 use crate::error::{GdxError, GdxResult};
 use crate::process::{cancellation_requested, ManagedChild};
 use crate::progress::ProgressReporter;
@@ -62,6 +64,7 @@ pub struct GodotRunResult {
     pub status_code: i32,
     pub duration_ms: u128,
     pub timeout_secs: u64,
+    pub project_has_csharp: Option<bool>,
     pub(crate) stdout_log: PathBuf,
     pub(crate) stderr_log: PathBuf,
     pub last_json: Option<Value>,
@@ -246,7 +249,11 @@ pub fn run_version(
     }
 }
 
-pub fn run(command: GodotCommand, progress: &ProgressReporter) -> GdxResult<GodotRunResult> {
+pub fn run(
+    command: GodotCommand,
+    progress: &ProgressReporter,
+    project_has_csharp: Option<bool>,
+) -> GdxResult<GodotRunResult> {
     let run_id = format!("r_{}", Uuid::new_v4().simple());
     let stdout_temp = temp_log_file("godot-stdout")?;
     let stderr_temp = temp_log_file("godot-stderr")?;
@@ -305,6 +312,7 @@ pub fn run(command: GodotCommand, progress: &ProgressReporter) -> GdxResult<Godo
                 status_code,
                 duration_ms: started.elapsed().as_millis(),
                 timeout_secs: command.timeout_secs,
+                project_has_csharp,
                 stdout_log,
                 stderr_log,
                 last_json: last_stdout_json(stdout_temp.path()),
@@ -321,7 +329,12 @@ pub fn run(command: GodotCommand, progress: &ProgressReporter) -> GdxResult<Godo
                 .with_child_pid(child_pid)
                 .with_elapsed_ms(started.elapsed().as_millis())
                 .with_timeout_secs(command.timeout_secs);
-            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+            return Err(attach_log_diagnostics_with_context(
+                error,
+                &stdout_log,
+                &stderr_log,
+                project_has_csharp,
+            ));
         }
 
         let overall_timed_out = command
@@ -341,7 +354,12 @@ pub fn run(command: GodotCommand, progress: &ProgressReporter) -> GdxResult<Godo
                 .with_child_pid(child_pid)
                 .with_elapsed_ms(started.elapsed().as_millis())
                 .with_timeout_secs(command.timeout_secs);
-            return Err(attach_log_diagnostics(error, &stdout_log, &stderr_log));
+            return Err(attach_log_diagnostics_with_context(
+                error,
+                &stdout_log,
+                &stderr_log,
+                project_has_csharp,
+            ));
         }
 
         if last_heartbeat.elapsed() >= Duration::from_secs(5) {
@@ -398,7 +416,12 @@ pub fn godot_failed(result: &GodotRunResult) -> GdxError {
     } else {
         error.with_suggestion("Fix the first error reported in structured diagnostics.")
     };
-    attach_log_diagnostics(error, &result.stdout_log, &result.stderr_log)
+    attach_log_diagnostics_with_context(
+        error,
+        &result.stdout_log,
+        &result.stderr_log,
+        result.project_has_csharp,
+    )
 }
 
 fn native_crash_error(
@@ -561,6 +584,7 @@ mod tests {
             status_code: 1,
             duration_ms: 1,
             timeout_secs: 60,
+            project_has_csharp: None,
             stdout_log: PathBuf::from("stdout.log"),
             stderr_log: PathBuf::from("stderr.log"),
             last_json: Some(json!({
@@ -592,6 +616,7 @@ mod tests {
             status_code: 0xC0000005u32 as i32,
             duration_ms: 1,
             timeout_secs: 60,
+            project_has_csharp: None,
             stdout_log: PathBuf::from("stdout.log"),
             stderr_log: PathBuf::from("stderr.log"),
             last_json: None,

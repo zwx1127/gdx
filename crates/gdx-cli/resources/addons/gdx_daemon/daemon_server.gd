@@ -1,6 +1,6 @@
 extends Node
 
-const RUNTIME_VERSION := "0.1.1"
+const RUNTIME_VERSION := "0.1.2"
 const PROTOCOL_VERSION := 1
 const SUPPORTED_METHODS := [
     "ping",
@@ -386,7 +386,7 @@ func _rpc_call_method(peer: StreamPeerTCP, id: String, params: Dictionary) -> vo
     for arg in args:
         converted.append(_to_variant(arg))
     var result = target.callv(method, converted)
-    _send_result(peer, id, { "target": target_path, "method": method, "result": _json_safe(result) })
+    _send_result(peer, id, { "target": target_path, "method": method, "result": _json_safe(result) }, ["result"])
 
 func _rpc_get_state(peer: StreamPeerTCP, id: String, params: Dictionary) -> void:
     var target_path := str(params.get("target", ""))
@@ -831,8 +831,8 @@ func _to_shape3d(value: Dictionary):
         _:
             return null
 
-func _send_result(peer: StreamPeerTCP, id: String, result: Dictionary) -> void:
-    _send(peer, { "ok": true, "id": id, "result": result })
+func _send_result(peer: StreamPeerTCP, id: String, result: Dictionary, inspection_path: Array = []) -> void:
+    _send(peer, { "ok": true, "id": id, "result": result }, inspection_path)
 
 func _send_error(peer: StreamPeerTCP, id: String, code: String, message: String, details: Dictionary = {}) -> void:
     var payload := { "ok": false, "id": id, "error": code, "message": message }
@@ -840,10 +840,54 @@ func _send_error(peer: StreamPeerTCP, id: String, code: String, message: String,
         payload["details"] = details
     _send(peer, payload)
 
-func _send(peer: StreamPeerTCP, payload: Dictionary) -> void:
+func _send(peer: StreamPeerTCP, payload: Dictionary, inspection_path: Array = []) -> void:
+    var non_finite_values: Array = []
+    var response_value = payload.get("result", payload) if bool(payload.get("ok", false)) else payload
+    for key in inspection_path:
+        if typeof(response_value) != TYPE_DICTIONARY or not response_value.has(key):
+            break
+        response_value = response_value[key]
+    _collect_non_finite_values(response_value, "", non_finite_values)
+    if not non_finite_values.is_empty():
+        payload = {
+            "ok": false,
+            "id": str(payload.get("id", "")),
+            "error": "daemon_non_finite_response",
+            "message": "Daemon RPC response contains non-finite floating-point values",
+            "details": {
+                "count": non_finite_values.size(),
+                "non_finite_values": non_finite_values,
+            },
+        }
     var line := JSON.stringify(payload) + "\n"
     peer.put_data(line.to_utf8_buffer())
     peer.disconnect_from_host()
+
+func _collect_non_finite_values(value, path: String, found: Array) -> void:
+    match typeof(value):
+        TYPE_FLOAT:
+            var number: float = value
+            if not is_finite(number):
+                found.append({
+                    "path": path,
+                    "kind": _non_finite_kind(number),
+                })
+        TYPE_ARRAY:
+            for index in range(value.size()):
+                _collect_non_finite_values(value[index], "%s/%s" % [path, index], found)
+        TYPE_DICTIONARY:
+            var keys: Array = value.keys()
+            keys.sort()
+            for key in keys:
+                var escaped_key := str(key).replace("~", "~0").replace("/", "~1")
+                _collect_non_finite_values(value[key], "%s/%s" % [path, escaped_key], found)
+
+func _non_finite_kind(value: float) -> String:
+    if is_nan(value):
+        return "nan"
+    if value > 0.0:
+        return "positive_infinity"
+    return "negative_infinity"
 
 func _fatal(code: String, message: String) -> void:
     push_error(message)

@@ -107,7 +107,9 @@ gdx --project .\demo daemon stop
 
 `daemon start` validates managed runtime compatibility before spawning Godot. Its health check verifies RPC readiness, scene loading, and hard startup errors. A newly created unhealthy daemon is stopped automatically; an already-running unhealthy daemon is reported but left running for the developer to inspect or stop.
 
-Active daemon session metadata and current logs live in a per-user OS temporary directory keyed by canonical project path. `daemon stop`, stale-session detection, and failed startup remove that state. `daemon start` and `daemon status` expose only concise `runtime` and `health` summaries; the token and full capability list are not returned.
+Active daemon session metadata and current logs live in a per-user OS temporary directory keyed by canonical project path. `daemon stop`, stale-session detection, and failed startup remove that state. `daemon start` exposes concise `runtime` and `health` summaries; `daemon status` also exposes `script_sync`. The token and full capability list are not returned.
+
+The daemon hashes active `.gd` files at startup. A later add, modification, or removal makes ordinary RPC commands fail with `daemon_scripts_stale`; status remains available and reports `fresh`, `stale`, or `unknown`. gdx never auto-restarts because that would silently discard scene state. Use `daemon start --restart`, then recreate the state needed for verification or capture. Direct RPC results containing INF, -INF, or NaN fail with `daemon_non_finite_response`; `details.non_finite_values` identifies each value by RFC 6901 path and kind.
 
 Touch commands require `touch_sequence` support and do not fall back to mouse input. Use `input drag` for drag or swipe gestures. `input send --pressed false` sends a release. Repeated `--arg` values are strings; use `--args-json <array>` for typed values, or `--args-json -` to read the array from stdin. JSON errors report origin and position without copying input content into the error.
 

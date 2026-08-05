@@ -107,7 +107,9 @@ gdx --project .\demo daemon stop
 
 `daemon start` 在启动 Godot 前验证管理 runtime 的兼容性，并检查 RPC、场景加载与启动硬错误。新建 daemon 不健康时会自动停止；已经运行但不健康的 daemon 只报告错误，保留给开发者检查或停止。
 
-活动 daemon 的 session 和当前日志存放在按项目规范路径散列的用户 OS 临时目录中。`daemon stop`、陈旧 session 检测和启动失败都会清理这些状态。`daemon start/status` 只返回紧凑的 `runtime` 与 `health`，不会返回 token 或完整 capability 列表。
+活动 daemon 的 session 和当前日志存放在按项目规范路径散列的用户 OS 临时目录中。`daemon stop`、陈旧 session 检测和启动失败都会清理这些状态。`daemon start` 返回紧凑的 `runtime` 与 `health`；`daemon status` 还返回 `script_sync`。两者都不会返回 token 或完整 capability 列表。
+
+daemon 启动时会哈希有效 `.gd` 文件。随后发生新增、修改或删除时，普通 RPC 返回 `daemon_scripts_stale`；status 仍可用，并报告 `fresh`、`stale` 或 `unknown`。gdx 不会自动重启，以免静默丢失场景状态；应执行 `daemon start --restart`，再重建验证或截图需要的状态。RPC 结果包含 INF、-INF 或 NaN 时返回 `daemon_non_finite_response`，`details.non_finite_values` 使用 RFC 6901 路径和类型精确定位每个值。
 
 触控命令要求 runtime 支持 `touch_sequence`，不会降级成鼠标输入。拖动和滑动都使用 `input drag`；释放事件使用 `input send --pressed false`。重复 `--arg` 只生成字符串；类型化参数使用 `--args-json <数组>`，或用 `--args-json -` 从 stdin 读取。JSON 错误只报告来源和位置，不复制输入内容。
 

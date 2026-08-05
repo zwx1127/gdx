@@ -10,7 +10,7 @@ use crate::constants::{
 use crate::error::{GdxError, GdxResult};
 use crate::project::ensure_parent_dir;
 
-pub(crate) const MANAGED_RUNTIME_VERSION: &str = "0.1.1";
+pub(crate) const MANAGED_RUNTIME_VERSION: &str = "0.1.2";
 pub(crate) const MANAGED_PROTOCOL_VERSION: u64 = 1;
 
 struct ResourceFile {
