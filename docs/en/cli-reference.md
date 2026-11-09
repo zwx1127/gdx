@@ -8,7 +8,7 @@ Redirect output with the shell when it must be retained:
 gdx --project .\demo --progress ndjson script check-all 1>result.json 2>progress.ndjson
 ```
 
-gdx does not persist command results, progress, or one-shot Godot logs in the project. Build provenance is reported by `doctor` only.
+By default, gdx does not persist command results, progress, or one-shot Godot logs in the project. Recording logs can be explicitly retained with `capture record --logs-dir`. Build provenance is reported by `doctor` only.
 
 ## Global options
 
@@ -125,4 +125,12 @@ gdx --project .\demo export build --preset "Windows Desktop" --out .\export\game
 
 `verify` is a generic declarative command runner for script checks, Godot tests, daemon calls, state reads, input, and capture. Its result contains compact `steps` summaries rather than copies of each nested command envelope. Product assertions, visual baselines, comparison metrics, thresholds, masks, and acceptance rules belong in the game project.
 
-`capture run` and one-shot Godot commands use temporary logs that are deleted when the command completes; failures retain bounded structured diagnostic tails, not log paths. `capture daemon`, `capture record`, and exports return only their explicitly requested artifacts.
+`capture run` and one-shot Godot commands use temporary logs that are deleted when the command completes; failures retain bounded structured diagnostic tails, not log paths. `capture daemon` and exports return their explicitly requested artifacts. `capture record` can additionally retain logs with `--logs-dir` (see below).
+
+### Recording evidence logs
+
+`capture record --logs-dir ./artifacts/logs` optionally retains unique, raw Godot stdout/stderr files when the child process exits. On success their absolute paths appear in `artifacts.stdout_log` and `artifacts.stderr_log`; `elapsed_ms` reports wall-clock child runtime, not movie duration. These files preserve renderer/device startup messages, fallback warnings and project output without parsing them into a guessed renderer or quality score. Repeated runs do not overwrite logs.
+
+Nonzero exits and missing/empty recordings include retained paths in `details.artifacts`. Spawn failures, timeouts and cancellation retain the existing bounded diagnostics only; full log retention for these cases is not implemented. Without `--logs-dir`, temporary logs are deleted as before. If retention fails, the command reports `io_failed`; an already-created movie may still exist. Logs may contain private project output; review before sharing. Movie success is not a gameplay, visual-quality or real-time performance pass.
+
+`resolution` reports requested dimensions, not a media probe: project viewport settings can produce a different encoded size. Verify actual dimensions, frame count and frame rate with a media inspector such as ffprobe before paired visual comparisons.

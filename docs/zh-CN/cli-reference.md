@@ -8,7 +8,7 @@
 gdx --project .\demo --progress ndjson script check-all 1>result.json 2>progress.ndjson
 ```
 
-gdx 不在项目中持久化命令结果、进度或一次性 Godot 日志。构建来源信息只由 `doctor` 返回。
+默认情况下，gdx 不在项目中持久化命令结果、进度或一次性 Godot 日志。录制可通过 `capture record --logs-dir` 显式保留日志。构建来源信息只由 `doctor` 返回。
 
 ## 全局选项
 
@@ -125,4 +125,12 @@ gdx --project .\demo export build --preset "Windows Desktop" --out .\export\game
 
 `verify` 是用于脚本检查、Godot 测试、daemon 调用、状态读取、输入与截图的通用声明式编排器。结果只返回紧凑的 `steps` 摘要，不复制每个子命令的完整 envelope。产品断言、视觉基线、比较指标、阈值、mask 和验收规则属于游戏业务层。
 
-`capture run` 等一次性 Godot 命令使用命令结束即删除的临时日志；失败只保留有界结构化诊断尾部，不返回日志路径。`capture daemon`、`capture record` 和 export 只返回调用方明确要求生成的 artifact。
+`capture run` 等一次性 Godot 命令使用命令结束即删除的临时日志；失败只保留有界结构化诊断尾部，不返回日志路径。`capture daemon` 和 export 返回调用方明确要求的 artifact；`capture record` 可额外通过 `--logs-dir` 保留日志（见下文）。
+
+### 录制日志证据
+
+`capture record --logs-dir ./artifacts/logs` 可选保留本次 Godot 进程退出后的原始 stdout/stderr，使用唯一文件名避免重复运行覆盖。成功结果通过 `artifacts.stdout_log`、`artifacts.stderr_log` 返回绝对路径；`elapsed_ms` 是子进程墙钟耗时，不是视频时长。日志保留实际渲染后端、设备、降级警告与项目输出，不自动推断质量或性能合格。
+
+进程非零退出或未生成非空影片时，路径在错误的 `details.artifacts`。启动失败、超时和取消仍只有现有有限诊断，尚不保留完整日志。不传 `--logs-dir` 时保持原来的临时日志清理行为。日志保留失败报告 `io_failed`，此时影片可能已经生成。日志可能包含项目私有内容，分享前需审阅。
+
+`resolution` 是请求尺寸，项目 viewport 设置可能让实际影片尺寸不同；用 ffprobe 等检查实际编码尺寸、帧数与帧率。录制成功不等同玩法、美术或实时性能验收。
